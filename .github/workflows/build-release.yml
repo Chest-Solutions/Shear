@@ -1,0 +1,102 @@
+name: build-release
+
+# Every pushed commit produces a new GitHub release containing the app:
+# the Go web server binary (serves the editor + API) plus the built
+# frontend (web/dist), zipped per platform.
+on:
+  push:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build server
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          out="shear"
+          [ "$GOOS" = "windows" ] && out="shear.exe"
+          go build -trimpath -ldflags="-s -w" -o "bin/$out" .
+
+      - name: Package
+        run: |
+          out="bin/shear"
+          [ "${{ matrix.goos }}" = "windows" ] && out="bin/shear.exe"
+          mkdir -p pkg/web
+          cp "$out" pkg/
+          cp -r web/dist pkg/web/dist
+          (cd pkg && zip -qr "../shear-${{ matrix.goos }}-${{ matrix.goarch }}.zip" .)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shear-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: shear-${{ matrix.goos }}-${{ matrix.goarch }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(git rev-parse --short HEAD)"
+          subject="$(git log -1 --pretty=%s)"
+          author="$(git log -1 --pretty=%an)"
+          files=""
+          for f in artifacts/*/*; do files="$files $f"; done
+          gh release create "run-${{ github.run_number }}" \
+            --title "Shear $sha · $subject" \
+            --notes "Commit $sha by $author on \`${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}\`
+
+          Run: \`./shear\` (or \`shear.exe\`) — serves the editor + API on :8080.
+
+          | Platform |
+          | --- |
+          | linux-amd64 · linux-arm64 · darwin-amd64 · darwin-arm64 · windows-amd64 |
+
+          Each zip contains the \`shear\` server and \`web/dist\` (the editor). The desktop webview shell (go build -tags webview) is built locally — it needs the system webview libraries." \
+            $files
