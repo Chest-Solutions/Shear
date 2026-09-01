@@ -1,0 +1,22 @@
+# build output
+dist/
+web/dist/
+node_modules/
+*.exe
+/shear
+
+# runtime data
+data/
+
+# editor & os
+.DS_Store
+.idea/
+.vscode/
+
+# go
+*.test
+go.work
+go.work.sum
+
+# test render outputs
+internal/app/testdata/*.png
