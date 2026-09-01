@@ -1,0 +1,27 @@
+name: fetch-go-toolchain
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Go toolchain
+        run: |
+          set -euo pipefail
+          VER="1.23.4"
+          curl -fsSL "https://dl.google.com/go/go${VER}.linux-amd64.tar.gz" -o go.tar.gz
+          curl -fsSL "https://dl.google.com/go/go${VER}.linux-amd64.tar.gz.sha256" -o go.tar.gz.sha256
+          echo "$(cat go.tar.gz.sha256)  go.tar.gz" | sha256sum -c -
+          ls -la go.tar.gz
+
+      - name: Push toolchain to temp branch
+        run: |
+          set -euo pipefail
+          git config user.name "arena-ai-coding-agent[bot]"
+          git config user.email "arena-ai-coding-agent[bot]@users.noreply.github.com"
+          git checkout -B tmp/go-toolchain
+          git add go.tar.gz
+          git commit -m "chore: temporary go toolchain artifact"
+          git push origin tmp/go-toolchain --force
