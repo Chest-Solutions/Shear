@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Maximize2, Minus, Plus } from 'lucide-react'
 import type { Node, Scene, Tool } from '../types'
 import { drawScene, screenToWorld, worldToScreen, type Viewport } from '../render'
-import { clamp, makeNode, nextName, round1 } from '../utils'
+import { clamp, defaultCornerRadii, makeNode, nextName, round1 } from '../utils'
 
 // ---- affine matrix helpers (row-major 2x3) ----
 interface Mat {
@@ -40,20 +40,21 @@ function invert(m: Mat): Mat {
   return { a, b, c, d, tx: -(a * m.tx + c * m.ty), ty: -(b * m.tx + d * m.ty) }
 }
 
-/** Local transform of a node in its parent's space (translate + rotation around center). */
+/** Local transform of a node in its parent's space (translate + rotation around the node center). */
 function nodeMat(n: Node): Mat {
   const cos = Math.cos((n.rotation * Math.PI) / 180)
   const sin = Math.sin((n.rotation * Math.PI) / 180)
-  const cx = n.x + n.width / 2
-  const cy = n.y + n.height / 2
-  // T(cx,cy) · R · T(-cx,-cy)
+  const cx = n.width / 2
+  const cy = n.height / 2
+  // T(x+cx,y+cy) · R · T(-cx,-cy). The old code forgot T(x,y), causing
+  // selection boxes/hit handles to stay stuck at 0,0 after moving an object.
   return {
     a: cos,
     b: sin,
     c: -sin,
     d: cos,
-    tx: cx - (cos * cx - sin * cy),
-    ty: cy - (sin * cx + cos * cy),
+    tx: n.x + cx - cos * cx + sin * cy,
+    ty: n.y + cy - sin * cx - cos * cy,
   }
 }
 
@@ -77,12 +78,20 @@ function hitTest(nodes: Node[], p: { x: number; y: number }): Node | null {
     const { node, world } = worlds[i]
     if (!node.visible) continue
     const lp = applyMat(invert(world), p.x, p.y)
-    if (lp.x >= 0 && lp.x <= node.width && lp.y >= 0 && lp.y <= node.height) return node
+    if (node.type === 'line') {
+      const ax = node.flip ? node.width : 0
+      const ay = 0
+      const bx = node.flip ? 0 : node.width
+      const by = node.height
+      const d = pointSegDistance(lp.x, lp.y, ax, ay, bx, by)
+      if (d <= Math.max(6, (node.stroke?.width ?? 2) + 4)) return node
+    } else if (lp.x >= 0 && lp.x <= node.width && lp.y >= 0 && lp.y <= node.height) return node
   }
   return null
 }
 
 type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+type CornerId = 'tl' | 'tr' | 'br' | 'bl'
 const HANDLES: { id: HandleId; fx: number; fy: number; cursor: string }[] = [
   { id: 'nw', fx: 0, fy: 0, cursor: 'nwse-resize' },
   { id: 'n', fx: 0.5, fy: 0, cursor: 'ns-resize' },
@@ -116,6 +125,8 @@ interface Props {
   commitTextEdit: (id: string, content: string) => void
   onToolDone: () => void
   onFit: () => void
+  onDuplicate: (id: string) => void
+  onDelete: (id: string) => void
 }
 
 export function CanvasView(props: Props) {
@@ -123,6 +134,8 @@ export function CanvasView(props: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [preview, setPreview] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const [guides, setGuides] = useState<{ x?: number[]; y?: number[] }>({})
+  const [menu, setMenu] = useState<{ sx: number; sy: number; wx: number; wy: number; nodeId: string | null } | null>(null)
   const [spaceDown, setSpaceDown] = useState(false)
   const dragRef = useRef<DragState | null>(null)
   const gestureDirty = useRef(false)
@@ -160,6 +173,7 @@ export function CanvasView(props: Props) {
     if (!ctx) return
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
+    drawPasteboardGrid(ctx, w, h, viewport)
     ctx.translate(viewport.panX, viewport.panY)
     ctx.scale(viewport.zoom, viewport.zoom)
 
@@ -171,27 +185,62 @@ export function CanvasView(props: Props) {
       const hit = worlds.find((x) => x.node.id === selectionId)
       if (hit) {
         const { node, world } = hit
-        const c = applyMat(world, node.width / 2, node.height / 2)
+        const pts = [
+          applyMat(world, 0, 0),
+          applyMat(world, node.width, 0),
+          applyMat(world, node.width, node.height),
+          applyMat(world, 0, node.height),
+        ]
         ctx.save()
-        ctx.translate(c.x, c.y)
-        ctx.rotate((node.rotation * Math.PI) / 180)
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+        ctx.strokeStyle = 'rgba(82, 154, 255, 0.98)'
         ctx.lineWidth = 1.25 / viewport.zoom
-        ctx.strokeRect(-node.width / 2, -node.height / 2, node.width, node.height)
+        ctx.beginPath()
+        ctx.moveTo(pts[0].x, pts[0].y)
+        for (const pt of pts.slice(1)) ctx.lineTo(pt.x, pt.y)
+        ctx.closePath()
+        ctx.stroke()
         const hs = 7 / viewport.zoom
         for (const hd of HANDLES) {
-          const hx = -node.width / 2 + node.width * hd.fx
-          const hy = -node.height / 2 + node.height * hd.fy
+          const hp = handleWorld(node, world, hd)
           ctx.fillStyle = '#ffffff'
           ctx.strokeStyle = 'rgba(23,23,23,0.9)'
           ctx.lineWidth = 1 / viewport.zoom
           ctx.beginPath()
-          ctx.rect(hx - hs / 2, hy - hs / 2, hs, hs)
+          ctx.rect(hp.x - hs / 2, hp.y - hs / 2, hs, hs)
           ctx.fill()
           ctx.stroke()
         }
+        if ((node.type === 'rect' || node.type === 'frame') && node.width > 20 && node.height > 20) {
+          const rs = cornerRadii(node)
+          const cornerPts = [
+            { id: 'tl', x: rs.tl, y: rs.tl },
+            { id: 'tr', x: node.width - rs.tr, y: rs.tr },
+            { id: 'br', x: node.width - rs.br, y: node.height - rs.br },
+            { id: 'bl', x: rs.bl, y: node.height - rs.bl },
+          ] as const
+          for (const cp of cornerPts) {
+            const p = applyMat(world, cp.x, cp.y)
+            ctx.beginPath()
+            ctx.arc(p.x, p.y, 5 / viewport.zoom, 0, Math.PI * 2)
+            ctx.fillStyle = '#2d7dff'
+            ctx.strokeStyle = '#111827'
+            ctx.lineWidth = 1.5 / viewport.zoom
+            ctx.fill(); ctx.stroke()
+          }
+        }
         ctx.restore()
       }
+    }
+
+    // smart guides
+    if (guides.x?.length || guides.y?.length) {
+      ctx.save()
+      ctx.strokeStyle = 'rgba(255, 49, 132, 0.95)'
+      ctx.lineWidth = 1 / viewport.zoom
+      ctx.setLineDash([6 / viewport.zoom, 3 / viewport.zoom])
+      for (const x of guides.x ?? []) { ctx.beginPath(); ctx.moveTo(x, -100000); ctx.lineTo(x, 100000); ctx.stroke() }
+      for (const y of guides.y ?? []) { ctx.beginPath(); ctx.moveTo(-100000, y); ctx.lineTo(100000, y); ctx.stroke() }
+      ctx.restore()
     }
 
     // draw preview (only while actively drawing)
@@ -214,7 +263,7 @@ export function CanvasView(props: Props) {
       }
       ctx.restore()
     }
-  }, [scene, selectionId, viewport, preview, tool])
+  }, [scene, selectionId, viewport, preview, tool, guides])
 
   // ---- wheel (zoom / pan), non-passive ----
   useEffect(() => {
@@ -277,14 +326,48 @@ export function CanvasView(props: Props) {
     return null
   }
 
+  const selectedWorld = () => selectionId ? nodeWorlds(scene.nodes).find((x) => x.node.id === selectionId) ?? null : null
+
+  const rotateHit = (wpt: { x: number; y: number }): boolean => {
+    const hit = selectedWorld()
+    if (!hit) return false
+    const lp = applyMat(invert(hit.world), wpt.x, wpt.y)
+    const pad = 16 / viewport.zoom
+    const nearX = lp.x >= -pad && lp.x <= hit.node.width + pad
+    const nearY = lp.y >= -pad && lp.y <= hit.node.height + pad
+    const inside = lp.x >= 0 && lp.x <= hit.node.width && lp.y >= 0 && lp.y <= hit.node.height
+    return nearX && nearY && !inside
+  }
+
+  const cornerHit = (wpt: { x: number; y: number }): CornerId | null => {
+    const hit = selectedWorld()
+    if (!hit || (hit.node.type !== 'rect' && hit.node.type !== 'frame')) return null
+    const rs = cornerRadii(hit.node)
+    const pts: { id: CornerId; x: number; y: number }[] = [
+      { id: 'tl', x: rs.tl, y: rs.tl },
+      { id: 'tr', x: hit.node.width - rs.tr, y: rs.tr },
+      { id: 'br', x: hit.node.width - rs.br, y: hit.node.height - rs.br },
+      { id: 'bl', x: rs.bl, y: hit.node.height - rs.bl },
+    ]
+    const r = 8 / viewport.zoom
+    for (const c of pts) {
+      const p = applyMat(hit.world, c.x, c.y)
+      if (Math.hypot(p.x - wpt.x, p.y - wpt.y) <= r) return c.id
+    }
+    return null
+  }
+
   interface DragState {
-    kind: 'move' | 'resize' | 'draw' | 'pan'
+    kind: 'move' | 'resize' | 'draw' | 'pan' | 'rotate' | 'corner'
     startWorld: { x: number; y: number }
     startClient: { x: number; y: number }
     startPan?: { x: number; y: number }
     handle?: HandleId
+    corner?: CornerId
+    startRotation?: number
+    startRadii?: { tl: number; tr: number; br: number; bl: number; linked: boolean }
     drawTool?: 'rect' | 'ellipse' | 'line'
-    nodeStart?: { x: number; y: number; w: number; h: number; flip: boolean }
+    nodeStart?: { x: number; y: number; w: number; h: number; flip: boolean; rotation?: number }
   }
 
   const onMouseDown = (e: React.MouseEvent) => {
@@ -298,13 +381,31 @@ export function CanvasView(props: Props) {
       e.preventDefault()
       return
     }
+    setMenu(null)
     if (e.button !== 0) return
 
     const wpt = toWorld(e)
 
     if (tool === 'select') {
+      const corner = cornerHit(wpt)
       const handle = handleHit(wpt)
       const target = hitTest(scene.nodes, wpt)
+      if (corner && selectionId) {
+        const n = findAny(scene.nodes, selectionId)
+        if (n) {
+          props.gestureBegin()
+          gestureDirty.current = false
+          dragRef.current = {
+            kind: 'corner',
+            startWorld: wpt,
+            startClient: { x: e.clientX, y: e.clientY },
+            corner,
+            startRadii: cornerRadii(n),
+            nodeStart: { x: n.x, y: n.y, w: n.width, h: n.height, flip: !!n.flip },
+          }
+          return
+        }
+      }
       if (handle && selectionId) {
         const n = scene.nodes && findAny(scene.nodes, selectionId)
         if (n) {
@@ -316,6 +417,23 @@ export function CanvasView(props: Props) {
             startClient: { x: e.clientX, y: e.clientY },
             handle,
             nodeStart: { x: n.x, y: n.y, w: n.width, h: n.height, flip: !!n.flip },
+          }
+          return
+        }
+      }
+      if (selectionId && rotateHit(wpt)) {
+        const n = findAny(scene.nodes, selectionId)
+        if (n) {
+          const hit = selectedWorld()
+          const center = hit ? applyMat(hit.world, n.width / 2, n.height / 2) : applyMat(nodeMat(n), n.width / 2, n.height / 2)
+          props.gestureBegin()
+          gestureDirty.current = false
+          dragRef.current = {
+            kind: 'rotate',
+            startWorld: wpt,
+            startClient: { x: e.clientX, y: e.clientY },
+            startRotation: angleDeg(center, wpt) - n.rotation,
+            nodeStart: { x: n.x, y: n.y, w: n.width, h: n.height, flip: !!n.flip, rotation: n.rotation },
           }
           return
         }
@@ -371,10 +489,15 @@ export function CanvasView(props: Props) {
           const wpt = screenToWorld(viewport, e.clientX - rect.left, e.clientY - rect.top)
           let cursor = tool === 'select' ? 'default' : 'crosshair'
           if (tool === 'select') {
+            const c = cornerHit(wpt)
             const h = handleHit(wpt)
-            if (h) {
+            if (c) {
+              cursor = 'cell'
+            } else if (h) {
               const def = HANDLES.find((x) => x.id === h)
               cursor = def?.cursor ?? 'default'
+            } else if (selectionId && rotateHit(wpt)) {
+              cursor = 'grab'
             } else if (hitTest(scene.nodes, wpt)) {
               cursor = 'move'
             }
@@ -405,12 +528,19 @@ export function CanvasView(props: Props) {
         const pMat = parent ? nodeMat(parent) : IDENTITY
         const ldx = pMat.a * dx + pMat.b * dy
         const ldy = pMat.c * dx + pMat.d * dy
+        const snapped = snapRectToGuides(
+          { x: drag.nodeStart!.x + ldx, y: drag.nodeStart!.y + ldy, w: drag.nodeStart!.w, h: drag.nodeStart!.h },
+          scene,
+          id,
+          viewport,
+        )
+        setGuides(snapped.guides)
         props.mutate(
           (nodes) => {
             const n = findAny(nodes, id)
             if (n) {
-              n.x = drag.nodeStart!.x + ldx
-              n.y = drag.nodeStart!.y + ldy
+              n.x = snapped.x
+              n.y = snapped.y
             }
           },
           false,
@@ -444,11 +574,12 @@ export function CanvasView(props: Props) {
           h = n0.h - ldy
           y = n0.y + ldy
         }
-        // aspect lock on corners
-        if (shift && hd.length === 2 && n0.w > 0 && n0.h > 0) {
-          const scale = Math.max(w / n0.w, h / n0.h)
-          w = n0.w * scale
-          h = n0.h * scale
+        // Photoshop/Figma-style square lock while scaling: Shift makes W and H equal,
+        // not locked to the old aspect ratio.
+        if (shift && hd.length === 2) {
+          const size = Math.max(Math.abs(w), Math.abs(h))
+          w = size
+          h = size
           if (hd.includes('w')) x = n0.x + n0.w - w
           if (hd.includes('n')) y = n0.y + n0.h - h
         }
@@ -463,8 +594,8 @@ export function CanvasView(props: Props) {
           y = y + h
           flip = !flip
         }
-        w = Math.max(1, w)
-        h = Math.max(1, h)
+        w = Math.max(n0.w === 0 ? 0 : 1, w)
+        h = Math.max(n0.h === 0 ? 0 : 1, h)
         props.mutate(
           (nodes) => {
             const n = findAny(nodes, id)
@@ -482,8 +613,50 @@ export function CanvasView(props: Props) {
         return
       }
 
+      if (drag.kind === 'rotate' && selectionId && drag.startRotation !== undefined) {
+        const hit = selectedWorld()
+        if (!hit) return
+        const center = applyMat(hit.world, hit.node.width / 2, hit.node.height / 2)
+        let rot = angleDeg(center, wpt) - drag.startRotation
+        if (e.shiftKey) rot = Math.round(rot / 15) * 15
+        props.mutate((nodes) => {
+          const n = findAny(nodes, selectionId)
+          if (n) n.rotation = round1(((rot % 360) + 360) % 360)
+        }, false)
+        gestureDirty.current = true
+        return
+      }
+
+      if (drag.kind === 'corner' && selectionId && drag.corner && drag.nodeStart) {
+        const hit = selectedWorld()
+        if (!hit) return
+        const lp = applyMat(invert(hit.world), wpt.x, wpt.y)
+        const maxR = Math.min(hit.node.width, hit.node.height) / 2
+        let r = 0
+        if (drag.corner === 'tl') r = Math.min(lp.x, lp.y)
+        if (drag.corner === 'tr') r = Math.min(hit.node.width - lp.x, lp.y)
+        if (drag.corner === 'br') r = Math.min(hit.node.width - lp.x, hit.node.height - lp.y)
+        if (drag.corner === 'bl') r = Math.min(lp.x, hit.node.height - lp.y)
+        r = round1(clamp(r, 0, maxR))
+        props.mutate((nodes) => {
+          const n = findAny(nodes, selectionId)
+          if (n) {
+            const next = { ...cornerRadii(n), linked: !e.shiftKey }
+            if (e.shiftKey) next[drag.corner!] = r
+            else next.tl = next.tr = next.br = next.bl = r
+            n.cornerRadii = next
+            n.cornerRadius = next.linked ? r : Math.max(next.tl, next.tr, next.br, next.bl)
+          }
+        }, false)
+        gestureDirty.current = true
+        return
+      }
+
       if (drag.kind === 'draw') {
-        setPreview({ x0: drag.startWorld.x, y0: drag.startWorld.y, x1: wpt.x, y1: wpt.y })
+        const snapped = constrainDrawPoint(drag.drawTool ?? 'rect', drag.startWorld, wpt, e.shiftKey)
+        const sg = snapPointToGuides(snapped, scene, null, viewport)
+        setGuides(sg.guides)
+        setPreview({ x0: drag.startWorld.x, y0: drag.startWorld.y, x1: sg.x, y1: sg.y })
       }
     }
 
@@ -497,11 +670,13 @@ export function CanvasView(props: Props) {
         const drawTool = drag.drawTool ?? 'rect'
         if (canvas) {
           const rect = canvas.getBoundingClientRect()
-          const wpt = screenToWorld(viewport, e.clientX - rect.left, e.clientY - rect.top)
+          let wpt = screenToWorld(viewport, e.clientX - rect.left, e.clientY - rect.top)
           const x0 = drag.startWorld.x
           const y0 = drag.startWorld.y
-          let x1 = wpt.x
-          let y1 = wpt.y
+          wpt = constrainDrawPoint(drawTool, drag.startWorld, wpt, e.shiftKey)
+          const snappedEnd = snapPointToGuides(wpt, scene, null, viewport)
+          let x1 = snappedEnd.x
+          let y1 = snappedEnd.y
           if (Math.abs(x1 - x0) > 0.5 || Math.abs(y1 - y0) > 0.5 || drawTool === 'line') {
             let n: Node
             if (drawTool === 'line') {
@@ -516,10 +691,10 @@ export function CanvasView(props: Props) {
               }
               n.x = Math.min(x0, x1)
               n.y = Math.min(y0, y1)
-              n.width = Math.max(1, Math.abs(x1 - x0))
-              n.height = Math.max(1, Math.abs(y1 - y0))
-              // flip when drawn top-right → bottom-left
-              n.flip = x1 < x0
+              n.width = Math.abs(x1 - x0)
+              n.height = Math.abs(y1 - y0)
+              // Negative slope uses the alternate diagonal. This fixes all four draw directions.
+              n.flip = (x1 - x0) * (y1 - y0) < 0
             } else {
               n = makeNode(drawTool, 0, 0, 1, 1)
               n.x = Math.min(x0, x1)
@@ -537,7 +712,7 @@ export function CanvasView(props: Props) {
           }
           props.onToolDone()
         }
-      } else if (drag.kind === 'move' || drag.kind === 'resize') {
+      } else if (drag.kind === 'move' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'corner') {
         // snap to 0.1
         if (selectionId) {
           props.mutate(
@@ -556,6 +731,7 @@ export function CanvasView(props: Props) {
       }
       if (gestureDirty.current) props.gestureEnd()
       setPreview(null)
+      setGuides({})
     }
 
     window.addEventListener('mousemove', onMove)
@@ -575,6 +751,37 @@ export function CanvasView(props: Props) {
       props.startTextEdit(hit.id)
     }
   }
+
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const wpt = toWorld(e)
+    const target = hitTest(scene.nodes, wpt)
+    if (target) props.select(target.id)
+    setMenu({ sx: e.clientX, sy: e.clientY, wx: wpt.x, wy: wpt.y, nodeId: target?.id ?? null })
+  }
+
+  const contextMenu = menu ? (
+    <div
+      className="absolute z-30 min-w-44 overflow-hidden rounded-lg border border-white/10 bg-neutral-950/95 p-1 text-[12px] text-neutral-200 shadow-2xl backdrop-blur-xl"
+      style={{ left: menu.sx - (wrapRef.current?.getBoundingClientRect().left ?? 0), top: menu.sy - (wrapRef.current?.getBoundingClientRect().top ?? 0) }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {menu.nodeId ? (
+        <>
+          <MenuItem onClick={() => { props.onDuplicate(menu.nodeId!); setMenu(null) }}>Duplicate</MenuItem>
+          <MenuItem onClick={() => { props.onDelete(menu.nodeId!); setMenu(null) }}>Delete</MenuItem>
+          <MenuItem onClick={() => { props.mutate(nodes => { const n = findAny(nodes, menu.nodeId!); if (n) n.locked = !n.locked }, true); setMenu(null) }}>Lock / unlock</MenuItem>
+          <MenuItem onClick={() => { props.mutate(nodes => { const n = findAny(nodes, menu.nodeId!); if (n) n.visible = !n.visible }, true); setMenu(null) }}>Show / hide</MenuItem>
+        </>
+      ) : (
+        <>
+          <MenuItem onClick={() => { const n = makeNode('rect', menu.wx, menu.wy, 160, 100); n.name = nextName(scene.nodes, 'rect'); props.addNode(n); props.select(n.id); setMenu(null) }}>Insert rectangle</MenuItem>
+          <MenuItem onClick={() => { const n = makeNode('text', menu.wx, menu.wy, 200, 32); n.name = nextName(scene.nodes, 'text'); props.addNode(n); props.select(n.id); setMenu(null) }}>Insert text</MenuItem>
+          <MenuItem onClick={() => { props.onFit(); setMenu(null) }}>Fit canvas</MenuItem>
+        </>
+      )}
+    </div>
+  ) : null
 
   // ---- text editing overlay ----
   const editingNode = editingId ? findAny(scene.nodes, editingId) : null
@@ -639,9 +846,11 @@ export function CanvasView(props: Props) {
         className="absolute inset-0 h-full w-full"
         onMouseDown={onMouseDown}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
         style={{ cursor: spaceDown ? 'grab' : undefined }}
       />
       {overlay}
+      {contextMenu}
 
       {/* zoom controls */}
       <div className="absolute bottom-3 right-3 z-10 flex items-center gap-0.5 rounded-lg border border-white/5 bg-neutral-900/70 p-0.5 shadow-panel backdrop-blur-xl select-none">
@@ -688,6 +897,10 @@ export function CanvasView(props: Props) {
   }
 }
 
+function MenuItem({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return <button onClick={onClick} className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-white/10">{children}</button>
+}
+
 function ZoomBtn({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title: string }) {
   return (
     <button
@@ -730,4 +943,104 @@ function hideText(nodes: Node[], id: string): Node[] {
     if (n.children) return { ...n, children: hideText(n.children, id) }
     return n
   })
+}
+
+function pointSegDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax
+  const dy = by - ay
+  const l2 = dx * dx + dy * dy || 1
+  const t = clamp(((px - ax) * dx + (py - ay) * dy) / l2, 0, 1)
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+}
+
+function angleDeg(c: { x: number; y: number }, p: { x: number; y: number }): number {
+  return (Math.atan2(p.y - c.y, p.x - c.x) * 180) / Math.PI
+}
+
+function cornerRadii(n: Node) {
+  const fallback = n.cornerRadius ?? 0
+  return n.cornerRadii ? { ...defaultCornerRadii(fallback), ...n.cornerRadii } : defaultCornerRadii(fallback)
+}
+
+function flattenNodes(nodes: Node[], exceptId: string | null, out: Node[] = []): Node[] {
+  for (const n of nodes) {
+    if (n.id !== exceptId && n.visible) out.push(n)
+    if (n.children) flattenNodes(n.children, exceptId, out)
+  }
+  return out
+}
+
+function guideTargets(scene: Scene, exceptId: string | null) {
+  const xs = [0, scene.width / 2, scene.width]
+  const ys = [0, scene.height / 2, scene.height]
+  for (const n of flattenNodes(scene.nodes, exceptId)) {
+    xs.push(n.x, n.x + n.width / 2, n.x + n.width)
+    ys.push(n.y, n.y + n.height / 2, n.y + n.height)
+  }
+  return { xs, ys }
+}
+
+function snapValue(v: number, targets: number[], tolerance: number): { v: number; guide?: number } {
+  let best = v
+  let guide: number | undefined
+  let dist = tolerance
+  for (const t of targets) {
+    const d = Math.abs(v - t)
+    if (d <= dist) { best = t; guide = t; dist = d }
+  }
+  return { v: best, guide }
+}
+
+function snapRectToGuides(rect: { x: number; y: number; w: number; h: number }, scene: Scene, exceptId: string | null, viewport: Viewport) {
+  const tol = 7 / viewport.zoom
+  const targets = guideTargets(scene, exceptId)
+  const xCandidates = [{ p: rect.x, off: 0 }, { p: rect.x + rect.w / 2, off: rect.w / 2 }, { p: rect.x + rect.w, off: rect.w }]
+  const yCandidates = [{ p: rect.y, off: 0 }, { p: rect.y + rect.h / 2, off: rect.h / 2 }, { p: rect.y + rect.h, off: rect.h }]
+  let x = rect.x, y = rect.y
+  const guides: { x?: number[]; y?: number[] } = {}
+  for (const c of xCandidates) {
+    const s = snapValue(c.p, targets.xs, tol)
+    if (s.guide !== undefined) { x = s.v - c.off; guides.x = [s.guide]; break }
+  }
+  for (const c of yCandidates) {
+    const s = snapValue(c.p, targets.ys, tol)
+    if (s.guide !== undefined) { y = s.v - c.off; guides.y = [s.guide]; break }
+  }
+  return { x, y, guides }
+}
+
+function snapPointToGuides(p: { x: number; y: number }, scene: Scene, exceptId: string | null, viewport: Viewport) {
+  const tol = 7 / viewport.zoom
+  const targets = guideTargets(scene, exceptId)
+  const sx = snapValue(p.x, targets.xs, tol)
+  const sy = snapValue(p.y, targets.ys, tol)
+  return { x: sx.v, y: sy.v, guides: { x: sx.guide !== undefined ? [sx.guide] : undefined, y: sy.guide !== undefined ? [sy.guide] : undefined } }
+}
+
+function constrainDrawPoint(tool: 'rect' | 'ellipse' | 'line', start: { x: number; y: number }, p: { x: number; y: number }, shift: boolean) {
+  if (!shift) return p
+  const dx = p.x - start.x
+  const dy = p.y - start.y
+  if (tool === 'line') {
+    const len = Math.hypot(dx, dy)
+    if (len < 0.01) return p
+    const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4)
+    return { x: start.x + Math.cos(a) * len, y: start.y + Math.sin(a) * len }
+  }
+  const size = Math.max(Math.abs(dx), Math.abs(dy))
+  return { x: start.x + Math.sign(dx || 1) * size, y: start.y + Math.sign(dy || 1) * size }
+}
+
+function drawPasteboardGrid(ctx: CanvasRenderingContext2D, w: number, h: number, viewport: Viewport) {
+  ctx.save()
+  ctx.fillStyle = '#262626'
+  ctx.fillRect(0, 0, w, h)
+  const minor = 20 * viewport.zoom
+  if (minor >= 6) {
+    const ox = ((viewport.panX % minor) + minor) % minor
+    const oy = ((viewport.panY % minor) + minor) % minor
+    ctx.fillStyle = 'rgba(255,255,255,0.10)'
+    for (let x = ox; x < w; x += minor) for (let y = oy; y < h; y += minor) ctx.fillRect(Math.round(x), Math.round(y), 1, 1)
+  }
+  ctx.restore()
 }

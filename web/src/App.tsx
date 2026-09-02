@@ -599,6 +599,8 @@ export default function App() {
               commitTextEdit={commitTextEdit}
               onToolDone={() => setTool('select')}
               onFit={fit}
+              onDuplicate={duplicateNode}
+              onDelete={deleteNode}
             />
           </div>
           <Toolbar tool={tool} onTool={setTool} />
