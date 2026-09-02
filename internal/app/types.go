@@ -35,6 +35,36 @@ type Stroke struct {
 	Width float64 `json:"width"`
 }
 
+type CornerRadii struct {
+	TL     float64 `json:"tl"`
+	TR     float64 `json:"tr"`
+	BR     float64 `json:"br"`
+	BL     float64 `json:"bl"`
+	Linked bool    `json:"linked"`
+}
+
+type Effect struct {
+	ID      string  `json:"id"`
+	Type    string  `json:"type"`
+	Visible bool    `json:"visible"`
+	Color   string  `json:"color,omitempty"`
+	X       float64 `json:"x,omitempty"`
+	Y       float64 `json:"y,omitempty"`
+	Blur    float64 `json:"blur"`
+	Spread  float64 `json:"spread,omitempty"`
+}
+
+type CSSFilters struct {
+	Invert     float64 `json:"invert"`
+	Grayscale  float64 `json:"grayscale"`
+	Sepia      float64 `json:"sepia"`
+	Blur       float64 `json:"blur"`
+	Brightness float64 `json:"brightness"`
+	Contrast   float64 `json:"contrast"`
+	Saturate   float64 `json:"saturate"`
+	HueRotate  float64 `json:"hueRotate"`
+}
+
 // TextData holds the typographic properties of a text node.
 type TextData struct {
 	Content    string    `json:"content"`
@@ -58,9 +88,12 @@ type Node struct {
 	Opacity     float64 `json:"opacity"`
 	Visible     bool    `json:"visible"`
 	Locked      bool    `json:"locked"`
-	Fill        *string `json:"fill"`
-	Stroke      *Stroke `json:"stroke,omitempty"`
-	CornerRadius float64 `json:"cornerRadius,omitempty"`
+	Fill         *string      `json:"fill"`
+	Stroke       *Stroke      `json:"stroke,omitempty"`
+	CornerRadius float64      `json:"cornerRadius,omitempty"`
+	CornerRadii  *CornerRadii `json:"cornerRadii,omitempty"`
+	Effects      []Effect     `json:"effects,omitempty"`
+	Filters      *CSSFilters  `json:"filters,omitempty"`
 	// Flip is line-only: true draws top-right to bottom-left.
 	Flip bool `json:"flip,omitempty"`
 	// Text is text-only.

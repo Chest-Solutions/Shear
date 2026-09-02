@@ -15,6 +15,45 @@ export interface TextData {
   align: TextAlign
 }
 
+export interface CornerRadii {
+  tl: number
+  tr: number
+  br: number
+  bl: number
+  linked: boolean
+}
+
+export interface ShadowEffect {
+  id: string
+  type: 'drop-shadow' | 'inner-shadow'
+  visible: boolean
+  color: string
+  x: number
+  y: number
+  blur: number
+  spread: number
+}
+
+export interface BlurEffect {
+  id: string
+  type: 'layer-blur' | 'background-blur'
+  visible: boolean
+  blur: number
+}
+
+export type Effect = ShadowEffect | BlurEffect
+
+export interface CssFilters {
+  invert: number
+  grayscale: number
+  sepia: number
+  blur: number
+  brightness: number
+  contrast: number
+  saturate: number
+  hueRotate: number
+}
+
 export interface Node {
   id: string
   name: string
@@ -30,7 +69,10 @@ export interface Node {
   fill: string | null
   stroke: Stroke | null
   cornerRadius?: number
-  flip?: boolean // line only
+  cornerRadii?: CornerRadii
+  effects?: Effect[]
+  filters?: CssFilters
+  flip?: boolean // line only; true draws the opposite diagonal (/ instead of \)
   text?: TextData // text only
   children?: Node[] // frame only
 }
