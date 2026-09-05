@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func sampleScene() Scene {
+func exportScene() Scene {
 	fill := "#ffffff"
 	return Scene{
 		ID: "sc1", Name: "Scene 1", Width: 400, Height: 300, Background: "#171717",
@@ -35,7 +35,7 @@ func sampleScene() Scene {
 }
 
 func TestRenderSceneSVG(t *testing.T) {
-	out := RenderSceneSVG(sampleScene())
+	out := RenderSceneSVG(exportScene())
 	for _, want := range []string{"<svg", `viewBox="0 0 400 300"`, "<rect", "feDropShadow", "<text", "Shear", "</svg>"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("svg missing %q\n%s", want, out)
@@ -44,7 +44,7 @@ func TestRenderSceneSVG(t *testing.T) {
 }
 
 func TestRenderSceneHTMLKeepsAnimation(t *testing.T) {
-	out := RenderSceneHTML(sampleScene())
+	out := RenderSceneHTML(exportScene())
 	for _, want := range []string{"<!doctype html>", "@keyframes", "cubic-bezier(0.25,0.1,0.25,1)", "box-shadow", "animation:", "opacity: 0", "opacity: 1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("html missing %q", want)
@@ -53,7 +53,7 @@ func TestRenderSceneHTMLKeepsAnimation(t *testing.T) {
 }
 
 func TestHoverTimelineRunsOnHover(t *testing.T) {
-	s := sampleScene()
+	s := exportScene()
 	s.Nodes[0].Timeline = &Timeline{
 		Duration: 0.25, Trigger: TriggerHover,
 		Tracks: []Track{{
