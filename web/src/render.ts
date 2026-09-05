@@ -1,4 +1,5 @@
 import type { CornerRadii, Node, Scene } from './types'
+import { adjustCSS } from './anim'
 
 export interface Viewport {
   zoom: number
@@ -34,19 +35,10 @@ const UI_FONT =
   "-apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, 'Segoe UI', Helvetica, Arial, sans-serif"
 
 function filters(n: Node): string {
-  const f = n.filters
   const parts: string[] = []
   for (const e of n.effects ?? []) if (e.visible && e.type === 'layer-blur' && e.blur > 0) parts.push(`blur(${e.blur}px)`)
-  if (f) {
-    if (f.blur) parts.push(`blur(${f.blur}px)`)
-    if (f.invert) parts.push(`invert(${f.invert}%)`)
-    if (f.grayscale) parts.push(`grayscale(${f.grayscale}%)`)
-    if (f.sepia) parts.push(`sepia(${f.sepia}%)`)
-    if (f.brightness !== undefined && f.brightness !== 100) parts.push(`brightness(${f.brightness}%)`)
-    if (f.contrast !== undefined && f.contrast !== 100) parts.push(`contrast(${f.contrast}%)`)
-    if (f.saturate !== undefined && f.saturate !== 100) parts.push(`saturate(${f.saturate}%)`)
-    if (f.hueRotate) parts.push(`hue-rotate(${f.hueRotate}deg)`)
-  }
+  const adj = adjustCSS(n.adjust)
+  if (adj) parts.push(adj)
   return parts.join(' ') || 'none'
 }
 
@@ -131,7 +123,8 @@ export function drawNode(ctx: CanvasRenderingContext2D, n: Node) {
   if (n.rotation !== 0) ctx.rotate((n.rotation * Math.PI) / 180)
   ctx.translate(-n.width / 2, -n.height / 2)
 
-  // Canvas supports CSS-like filters, so Shear now exposes many CSS effects directly.
+  // Canvas takes the same filter syntax as CSS, so adjustments render
+  // identically on the canvas and in preview/export.
   ctx.filter = filters(n)
   const r = radii(n)
 

@@ -51,9 +51,26 @@ func main() {
 		}
 	}()
 
+	// Make sure the OS knows this binary owns shear:// links, so a share
+	// link opened in a browser can hand the session to this app.
+	if err := app.RegisterProtocol(); err != nil {
+		log.Printf("note: could not register the shear:// handler: %v", err)
+	}
+
+	// A share link can be handed to the app as a launch argument, either
+	// as shear://host/join/<id> or as the plain http link. Both point at
+	// the *host's* backend, so we navigate there instead of to our own.
+	start := fmt.Sprintf("http://127.0.0.1:%d", port)
+	if len(os.Args) > 1 {
+		if join := app.ParseJoinArg(os.Args[1]); join != "" {
+			start = join
+		}
+	}
+
 	window := wv.New(false)
 	window.SetTitle("Shear")
 	window.SetSize(1440, 900, wv.HintNone)
-	window.Navigate(fmt.Sprintf("http://127.0.0.1:%d", port))
+	window.Navigate(start)
 	window.Run()
 }
+

@@ -54,15 +54,74 @@ type Effect struct {
 	Spread  float64 `json:"spread,omitempty"`
 }
 
-type CSSFilters struct {
-	Invert     float64 `json:"invert"`
-	Grayscale  float64 `json:"grayscale"`
-	Sepia      float64 `json:"sepia"`
-	Blur       float64 `json:"blur"`
-	Brightness float64 `json:"brightness"`
-	Contrast   float64 `json:"contrast"`
-	Saturate   float64 `json:"saturate"`
-	HueRotate  float64 `json:"hueRotate"`
+
+// Trigger is what starts a timeline.
+//
+//	view  — plays when the design is first shown
+//	hover — plays while the pointer is over the object
+//	click — plays once per click
+//	loop  — plays continuously
+type Trigger string
+
+const (
+	TriggerView  Trigger = "view"
+	TriggerHover Trigger = "hover"
+	TriggerClick Trigger = "click"
+	TriggerLoop  Trigger = "loop"
+)
+
+// Adjust holds image adjustments. Every value is an offset from normal,
+// so the zero value means "untouched".
+type Adjust struct {
+	Brightness  float64 `json:"brightness"`
+	Contrast    float64 `json:"contrast"`
+	Saturation  float64 `json:"saturation"`
+	Temperature float64 `json:"temperature"`
+	Hue         float64 `json:"hue"`
+	Blur        float64 `json:"blur"`
+	Grayscale   float64 `json:"grayscale"`
+	Invert      float64 `json:"invert"`
+}
+
+// Keyframe is a value at a point in time, plus the curve leading out of
+// it toward the next keyframe. Value is a number for most properties and
+// a colour string for fills.
+type Keyframe struct {
+	ID     string     `json:"id"`
+	Time   float64    `json:"time"`
+	Value  any        `json:"value"`
+	Easing [4]float64 `json:"easing"`
+}
+
+// Track is every keyframe for one property.
+type Track struct {
+	ID       string     `json:"id"`
+	Property string     `json:"property"`
+	Keys     []Keyframe `json:"keys"`
+}
+
+// Timeline is a node's animation: tracks on a shared clock.
+type Timeline struct {
+	Duration float64 `json:"duration"`
+	Trigger  Trigger `json:"trigger"`
+	Loop     bool    `json:"loop"`
+	Tracks   []Track `json:"tracks"`
+}
+
+// Num returns a keyframe value as a float (0 when it is a colour).
+func (k Keyframe) Num() float64 {
+	if f, ok := k.Value.(float64); ok {
+		return f
+	}
+	return 0
+}
+
+// Str returns a keyframe value as a string (empty when it is a number).
+func (k Keyframe) Str() string {
+	if s, ok := k.Value.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // TextData holds the typographic properties of a text node.
@@ -93,7 +152,8 @@ type Node struct {
 	CornerRadius float64      `json:"cornerRadius,omitempty"`
 	CornerRadii  *CornerRadii `json:"cornerRadii,omitempty"`
 	Effects      []Effect     `json:"effects,omitempty"`
-	Filters      *CSSFilters  `json:"filters,omitempty"`
+	Adjust       *Adjust      `json:"adjust,omitempty"`
+	Timeline     *Timeline    `json:"timeline,omitempty"`
 	// Flip is line-only: true draws top-right to bottom-left.
 	Flip bool `json:"flip,omitempty"`
 	// Text is text-only.

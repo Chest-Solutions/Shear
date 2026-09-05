@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Document, Node, Scene, Tool } from './types'
 import { uid, clone, slug, downloadBlob, clamp, round1 } from './utils'
-import { exportScenePNG, getDocument, listDocuments, saveDocument } from './api'
+import { exportSceneHTML, exportScenePNG, exportSceneSVG, getDocument, listDocuments, saveDocument } from './api'
+import { resolveNodes, sceneDuration, sceneLoops, syncTree } from './anim'
 import { TopBar } from './components/TopBar'
 import { Toolbar } from './components/Toolbar'
 import { LeftPanel } from './components/LeftPanel'
 import { RightPanel } from './components/RightPanel'
 import { CanvasView, findAny } from './components/CanvasView'
-import { ExportModal } from './components/ExportModal'
+import { ExportModal, type SceneFormat } from './components/ExportModal'
+import { PreviewOverlay } from './components/PreviewOverlay'
+import { ShareSheet } from './components/ShareSheet'
+import { createSession, useCollab, type Session } from './collab'
+import { JoinGate } from './components/JoinGate'
 import { Toasts, type ToastItem } from './components/Toast'
 import type { Viewport } from './render'
 
@@ -38,6 +43,17 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const [exportOpen, setExportOpen] = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [session, setSession] = useState<Session | null>(null)
+  const [starting, setStarting] = useState(false)
+  // Timeline scrubbing: the canvas shows the scene at this time.
+  const [time, setTime] = useState(0)
+  const [timelinePlaying, setTimelinePlaying] = useState(false)
+  const [joined, setJoined] = useState(false)
+  const [myName, setMyName] = useState(
+    () => (typeof window !== 'undefined' ? sessionStorage.getItem('shear.name') ?? '' : ''),
+  )
 
   const past = useRef<Document[]>([])
   const future = useRef<Document[]>([])
@@ -48,6 +64,29 @@ export default function App() {
   const lastHistoryPush = useRef(0)
   const docRef = useRef(doc)
   docRef.current = doc
+
+  // ---- live session ----
+  // /join/<id> means we were handed a share link: connect instead of
+  // loading the local document.
+  const joinId = useRef<string | null>(
+    typeof window !== 'undefined' ? (/^\/join\/(\w+)/.exec(window.location.pathname)?.[1] ?? null) : null,
+  ).current
+
+  const applyRemoteDoc = useCallback((d: Document) => {
+    past.current = []
+    future.current = []
+    setDoc(d)
+    setLoading(false)
+  }, [])
+
+  const collab = useCollab({
+    sessionId: session?.id ?? (joined ? joinId : null),
+    name: myName.trim() || 'Designer',
+    onDocument: applyRemoteDoc,
+    docRef,
+  })
+  const live = collab.connected
+  const pushDocument = collab.pushDocument
 
   const scene = doc.scenes.find((s) => s.id === doc.selectedSceneId) ?? doc.scenes[0]
   const currentSceneId = scene.id
@@ -61,6 +100,7 @@ export default function App() {
 
   // ---- initial load: restore the most recent document from the Go backend ----
   useEffect(() => {
+    if (joinId) return
     let cancelled = false
     ;(async () => {
       try {
@@ -82,11 +122,16 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [joinId])
+
+  // Publish every local edit to the room (debounced inside the hook).
+  useEffect(() => {
+    if (live) pushDocument()
+  }, [doc, live, pushDocument])
 
   // ---- autosave (debounced) ----
   useEffect(() => {
-    if (loading || !dirty.current) return
+    if (loading || !dirty.current || joinId) return
     const t = setTimeout(async () => {
       try {
         await saveDocument(docRef.current)
@@ -97,7 +142,7 @@ export default function App() {
       }
     }, 1200)
     return () => clearTimeout(t)
-  }, [doc, loading])
+  }, [doc, loading, joinId])
 
   // ---- history ----
   // Rapid successive edits (slider drags, typing in a name) coalesce into a
@@ -149,11 +194,21 @@ export default function App() {
     gestureTouched.current = true
   }
 
+  const timeRef = useRef(0)
+
   const mutateScene = useCallback(
     (sceneId: string, fn: (s: Scene) => void, recordHistory: boolean) => {
       const doIt = (d: Document) => {
         const s = d.scenes.find((x) => x.id === sceneId)
-        if (s) fn(s)
+        if (!s) return
+        // Snapshot from the live document: `d` is already a clone, so the
+        // scene's own nodes are about to be mutated in place by fn.
+        const before = docRef.current.scenes.find((x) => x.id === sceneId)?.nodes ?? []
+        fn(s)
+        // If a property is keyframed, an edit becomes a keyframe at the
+        // playhead — otherwise the timeline would immediately sample over
+        // the change and the object would feel stuck on its path.
+        s.nodes = syncTree(before, s.nodes, timeRef.current)
       }
       if (recordHistory) record(doIt)
       else apply(doIt)
@@ -384,34 +439,66 @@ export default function App() {
   )
 
   // ---- export / import ----
-  const exportJSON = useCallback(() => {
+  // A .shear file is the whole document — scenes, styles and animations —
+  // as JSON, so it can be handed to another designer as one file.
+  const exportShear = useCallback(() => {
     const data = { ...docRef.current, updatedAt: new Date().toISOString() }
-    downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `${slug(data.name)}.shear.json`)
-    toast('JSON exported')
+    downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `${slug(data.name)}.shear`)
+    toast('Saved .shear file')
   }, [toast])
 
-  const doExportPNG = useCallback(
-    async (sceneId: string) => {
+  const doExportScene = useCallback(
+    async (sceneId: string, format: SceneFormat) => {
       const s = docRef.current.scenes.find((x) => x.id === sceneId)
       if (!s) throw new Error('scene not found')
-      const blob = await exportScenePNG(s, 2)
-      downloadBlob(blob, `${slug(s.name)}.png`)
+      const blob =
+        format === 'png' ? await exportScenePNG(s, 2) : format === 'svg' ? await exportSceneSVG(s) : await exportSceneHTML(s)
+      downloadBlob(blob, `${slug(s.name)}.${format}`)
       setExportOpen(false)
-      toast('PNG exported')
+      toast(`${format.toUpperCase()} exported`)
     },
     [toast],
+  )
+
+  // ---- work together ----
+  const startSession = useCallback(async () => {
+    sessionStorage.setItem('shear.name', myName.trim() || 'Designer')
+    setStarting(true)
+    try {
+      const s = await createSession(docRef.current)
+      setSession(s)
+      toast('Session started')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not start session')
+    } finally {
+      setStarting(false)
+    }
+  }, [toast, myName])
+
+  const endSession = useCallback(() => {
+    setSession(null)
+    setShareOpen(false)
+    toast('Left the session')
+  }, [toast])
+
+  const broadcastPointer = useCallback(
+    (p: { x: number; y: number }) => {
+      if (!live) return
+      collab.sendPresence({ x: p.x, y: p.y, sceneId: currentSceneId, selection: selectionId })
+    },
+    [live, collab, currentSceneId, selectionId],
   )
 
   const importJSON = useCallback(
     async (file: File) => {
       try {
         const parsed = JSON.parse(await file.text()) as Partial<Document>
-        if (!Array.isArray(parsed.scenes) || parsed.scenes.length === 0) throw new Error('not a Shear document')
+        if (!Array.isArray(parsed.scenes) || parsed.scenes.length === 0) throw new Error('not a Shear file')
         const d: Document = {
           version: 1,
           app: 'shear',
           id: parsed.id || uid(),
-          name: parsed.name || file.name.replace(/\.json$/, '') || 'Untitled',
+          name: parsed.name || file.name.replace(/\.(shear|json)$/, '') || 'Untitled',
           updatedAt: new Date().toISOString(),
           selectedSceneId: parsed.selectedSceneId && parsed.scenes.some((s) => s.id === parsed.selectedSceneId) ? parsed.selectedSceneId : parsed.scenes[0].id,
           scenes: parsed.scenes,
@@ -437,7 +524,9 @@ export default function App() {
       const meta = e.metaKey || e.ctrlKey
 
       if (e.key === 'Escape') {
-        if (editingId) closeTextEdit()
+        if (playing) setPlaying(false)
+        else if (shareOpen) setShareOpen(false)
+        else if (editingId) closeTextEdit()
         else if (exportOpen) setExportOpen(false)
         else setSelectionId(null)
         return
@@ -462,7 +551,12 @@ export default function App() {
       }
       if (meta && (e.key === 'e' || e.key === 'E')) {
         e.preventDefault()
-        exportJSON()
+        exportShear()
+        return
+      }
+      if (meta && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault()
+        setPlaying(true)
         return
       }
       if (!meta) {
@@ -509,7 +603,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editingId, exportOpen, selectionId, undo, redo, duplicateNode, deleteNode, exportJSON, mutateScene, currentSceneId, closeTextEdit])
+  }, [editingId, exportOpen, playing, shareOpen, selectionId, undo, redo, duplicateNode, deleteNode, exportShear, mutateScene, currentSceneId, closeTextEdit])
 
   // canvas node mutation: live (unrecorded) writes mark the gesture as touched
   const canvasMutate = useCallback(
@@ -524,6 +618,40 @@ export default function App() {
     [mutateScene, currentSceneId],
   )
 
+  // ---- timeline clock ----
+  // Playing in the editor scrubs the canvas; it stops at the end unless
+  // something in the scene loops.
+  useEffect(() => {
+    if (!timelinePlaying) return
+    const dur = Math.max(sceneDuration(scene.nodes), 0.1)
+    const loops = sceneLoops(scene.nodes)
+    let frame = 0
+    const started = performance.now() - time * 1000
+    const tick = () => {
+      const t = (performance.now() - started) / 1000
+      if (t >= dur && !loops) {
+        setTime(dur)
+        setTimelinePlaying(false)
+        return
+      }
+      setTime(loops ? t % dur : t)
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+    // `time` seeds the clock but must not restart it every frame.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timelinePlaying, scene.nodes])
+
+  // The canvas draws the scene sampled at the playhead. At time 0 with no
+  // keyframes this is the untouched scene, so editing is unaffected.
+  timeRef.current = time
+
+  const displayScene = useMemo(
+    () => (time > 0 ? { ...scene, nodes: resolveNodes(scene.nodes, time) } : scene),
+    [scene, time],
+  )
+
   const fit = useCallback(() => {
     const el = document.querySelector('.canvas-wrap') as HTMLElement | null
     if (!el) return
@@ -533,7 +661,11 @@ export default function App() {
     setViewport({ zoom, panX: (vw - scene.width * zoom) / 2, panY: (vh - scene.height * zoom) / 2 })
   }, [scene.width, scene.height])
 
-  if (loading) {
+  if (joinId && !joined) {
+    return <JoinGate sessionId={joinId} onContinue={() => setJoined(true)} />
+  }
+
+  if (loading && !joinId) {
     return (
       <div className="flex h-full items-center justify-center bg-neutral-800">
         <div className="h-4 w-4 animate-pulse rounded-full bg-neutral-600" />
@@ -548,8 +680,13 @@ export default function App() {
         onRename={(name) => apply((d) => (d.name = name))}
         savedAt={savedAt}
         onImport={importJSON}
-        onExportJSON={exportJSON}
-        onExportPNG={() => setExportOpen(true)}
+        onExportShear={exportShear}
+        onExportScene={() => setExportOpen(true)}
+        onPlay={() => setPlaying(true)}
+        onShare={() => setShareOpen(true)}
+        peers={collab.peers}
+        self={collab.self}
+        live={live}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -583,7 +720,7 @@ export default function App() {
         <main className="relative min-w-0 flex-1">
           <div className="canvas-wrap absolute inset-0">
             <CanvasView
-              scene={scene}
+              scene={displayScene}
               tool={tool}
               selectionId={selectionId}
               editingId={editingId}
@@ -601,6 +738,8 @@ export default function App() {
               onFit={fit}
               onDuplicate={duplicateNode}
               onDelete={deleteNode}
+              peers={collab.peers}
+              onPointer={broadcastPointer}
             />
           </div>
           <Toolbar tool={tool} onTool={setTool} />
@@ -615,6 +754,10 @@ export default function App() {
           onDuplicate={duplicateNode}
           onDelete={deleteNode}
           onSelect={() => setSelectionId(null)}
+          time={time}
+          playing={timelinePlaying}
+          onTime={setTime}
+          onPlaying={setTimelinePlaying}
         />
       </div>
 
@@ -623,7 +766,22 @@ export default function App() {
         scenes={doc.scenes}
         defaultSceneId={currentSceneId}
         onClose={() => setExportOpen(false)}
-        onExport={doExportPNG}
+        onExport={doExportScene}
+      />
+
+      <PreviewOverlay scene={scene} open={playing} onClose={() => setPlaying(false)} />
+
+      <ShareSheet
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        url={session?.url ?? null}
+        starting={starting}
+        peers={collab.peers}
+        self={collab.self}
+        name={myName}
+        onName={setMyName}
+        onStart={startSession}
+        onEnd={endSession}
       />
       <Toasts toasts={toasts} />
     </div>

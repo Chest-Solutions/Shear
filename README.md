@@ -18,10 +18,34 @@ Shear is a golang alternative to Figma for designing UI prototypes.
 - Layers panel: rename, show/hide, lock, drag to reorder
 - Live property editing: position/size, fill, stroke, corner radius,
   typography (size, weight, color, alignment)
+- Drop shadows, inner shadows, layer blur, background blur, and CSS filters
+- **Animations** — every object can carry several trigger→motion rules
+  (`On view`, `On hover`, `On click`, `Loop`), each with its own delay,
+  duration and draggable cubic-bézier easing curve
+- **Preview (⇧⌘P)** — plays the scene as real DOM, exactly as it exports
 - Undo / redo (⌘Z / ⇧⌘Z), duplicate (⌘D), nudge with arrow keys
 - Autosave to the Go backend (JSON on disk in `data/`)
-- **Export JSON** — the full design file (every scene, node, and property)
-- **Export PNG** — one scene at a time, rendered server-side in Go at 2×
+
+### Export — nothing stays trapped in the editor
+
+| Format | What you get |
+| --- | --- |
+| `.shear` | The whole document: scenes, styles, animations. Hand it to another designer, they open it. |
+| PNG | One scene, rendered server-side in Go at 2×. |
+| SVG | One scene as vectors, with filters and shadows. |
+| HTML | A self-contained page — the animations, triggers and easing curves all still run. |
+
+### Work together
+
+Press **Share → Start session**. The Go backend opens a room, and the
+link points at this machine's network address. Whoever opens it is asked
+to open the desktop app (`shear://…`) or continue in the browser, then
+lands in the same document. Every participant gets a name and a colour;
+their cursor and their current selection are visible to everyone else.
+
+The transport is one Server-Sent Events stream per peer plus small JSON
+posts — standard library only, so the desktop build stays a single
+binary with no broker to run.
 
 ## Quick start
 

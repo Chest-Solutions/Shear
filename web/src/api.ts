@@ -52,3 +52,25 @@ export async function exportScenePNG(scene: Scene, scale = 2): Promise<Blob> {
   }
   return res.blob()
 }
+
+/** Render a scene to a standalone SVG document (vector, in Go). */
+export async function exportSceneSVG(scene: Scene): Promise<Blob> {
+  const res = await fetch('/api/export/svg', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scene }),
+  })
+  if (!res.ok) throw new Error('SVG export failed')
+  return res.blob()
+}
+
+/** Render a scene to a self-contained HTML page, animations included. */
+export async function exportSceneHTML(scene: Scene): Promise<Blob> {
+  const res = await fetch('/api/export/html', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scene }),
+  })
+  if (!res.ok) throw new Error('HTML export failed')
+  return res.blob()
+}

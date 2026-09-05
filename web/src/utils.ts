@@ -1,4 +1,4 @@
-import type { CornerRadii, CssFilters, Node, NodeType } from './types'
+import type { CornerRadii, Node, NodeType } from './types'
 import { NODE_TYPE_LABEL } from './types'
 
 let counter = 0
@@ -72,10 +72,6 @@ export function defaultCornerRadii(v = 0): CornerRadii {
   return { tl: v, tr: v, br: v, bl: v, linked: true }
 }
 
-export function defaultFilters(): CssFilters {
-  return { invert: 0, grayscale: 0, sepia: 0, blur: 0, brightness: 100, contrast: 100, saturate: 100, hueRotate: 0 }
-}
-
 export function makeNode(type: NodeType, x: number, y: number, w: number, h: number): Node {
   const base: Node = {
     id: uid(),
@@ -92,7 +88,6 @@ export function makeNode(type: NodeType, x: number, y: number, w: number, h: num
     fill: type === 'rect' || type === 'frame' ? '#ffffff' : type === 'ellipse' ? '#ffffff' : null,
     stroke: null,
     effects: [],
-    filters: defaultFilters(),
   }
   switch (type) {
     case 'frame':

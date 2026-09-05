@@ -12,8 +12,9 @@ import (
 
 // Server holds the API dependencies.
 type Server struct {
-	Store  *Store
+	Store   *Store
 	DistDir string
+	Hub     *Hub
 }
 
 // NewHandler wires up the full HTTP handler (API + static frontend).
@@ -22,7 +23,7 @@ func NewHandler(dataDir, distDir string) http.Handler {
 	if err != nil {
 		store, _ = NewStore(filepath.Join(os.TempDir(), "shear-data"))
 	}
-	s := &Server{Store: store, DistDir: distDir}
+	s := &Server{Store: store, DistDir: distDir, Hub: NewHub()}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/health", s.handleHealth)
@@ -31,6 +32,15 @@ func NewHandler(dataDir, distDir string) http.Handler {
 	mux.HandleFunc("PUT /api/documents/{id}", s.handlePutDocument)
 	mux.HandleFunc("DELETE /api/documents/{id}", s.handleDeleteDocument)
 	mux.HandleFunc("POST /api/export/png", s.handleExportPNG)
+	mux.HandleFunc("POST /api/export/svg", s.handleExportSVG)
+	mux.HandleFunc("POST /api/export/html", s.handleExportHTML)
+
+	// Work together.
+	mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
+	mux.HandleFunc("GET /api/sessions/{id}", s.handleSessionInfo)
+	mux.HandleFunc("GET /api/sessions/{id}/events", s.handleSessionEvents)
+	mux.HandleFunc("POST /api/sessions/{id}/presence", s.handlePresence)
+	mux.HandleFunc("POST /api/sessions/{id}/document", s.handleSessionDoc)
 
 	return s.withStatic(mux)
 }
@@ -127,6 +137,30 @@ func (s *Server) handleExportPNG(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+type sceneExportRequest struct {
+	Scene Scene `json:"scene"`
+}
+
+func (s *Server) handleExportSVG(w http.ResponseWriter, r *http.Request) {
+	var req sceneExportRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 20<<20)).Decode(&req); err != nil {
+		writeErr(w, 400, "invalid export request: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	_, _ = io.WriteString(w, RenderSceneSVG(req.Scene))
+}
+
+func (s *Server) handleExportHTML(w http.ResponseWriter, r *http.Request) {
+	var req sceneExportRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 20<<20)).Decode(&req); err != nil {
+		writeErr(w, 400, "invalid export request: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, RenderSceneHTML(req.Scene))
+}
+
 // withStatic serves the built frontend from DistDir with an SPA fallback.
 func (s *Server) withStatic(api http.Handler) http.Handler {
 	dist := s.DistDir
@@ -135,6 +169,7 @@ func (s *Server) withStatic(api http.Handler) http.Handler {
 			writeErr(w, 503, "frontend not built — run: cd web && npm ci && npm run build")
 		})
 	}
+	index := filepath.Join(dist, "index.html")
 	fs := http.FileServer(http.Dir(dist))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
@@ -142,17 +177,22 @@ func (s *Server) withStatic(api http.Handler) http.Handler {
 			api.ServeHTTP(w, r)
 			return
 		}
-		if p == "/" {
-			p = "/index.html"
-		}
 		full := filepath.Join(dist, filepath.Clean(strings.TrimPrefix(p, "/")))
-		if st, err := os.Stat(full); err != nil || st.IsDir() {
-			// SPA fallback.
-			r2 := *r
-			r2.URL.Path = "/index.html"
-			fs.ServeHTTP(w, &r2)
-			return
+		if p != "/" {
+			if st, err := os.Stat(full); err == nil && !st.IsDir() {
+				fs.ServeHTTP(w, r)
+				return
+			}
 		}
-		fs.ServeHTTP(w, r)
+		// SPA fallback for "/" and for client routes like /join/<id>.
+		//
+		// This serves index.html directly rather than rewriting the path
+		// and handing it to http.FileServer: FileServer canonicalises a
+		// request for "index.html" by redirecting to "./", which on a
+		// route like /join/<id> redirects forever ("redirected too many
+		// times") instead of booting the app.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, index)
 	})
 }
