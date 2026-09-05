@@ -1,19 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Download, FileJson, Image, Upload } from 'lucide-react'
+import { Download, FileCode2, FileJson, Image, Play, Upload, Users } from 'lucide-react'
+import type { Peer } from '../types'
+import { PeerAvatars } from './Presence'
 
 interface Props {
   docName: string
   onRename: (name: string) => void
   savedAt: string | null
   onImport: (file: File) => void
-  onExportJSON: () => void
-  onExportPNG: () => void
+  onExportShear: () => void
+  onExportScene: () => void
+  onPlay: () => void
+  onShare: () => void
+  peers: Peer[]
+  self: Peer | null
+  live: boolean
 }
 
-const EASE = [0.16, 1, 0.3, 1] as const
+const EASE = [0.25, 0.1, 0.25, 1] as const
 
-export function TopBar({ docName, onRename, savedAt, onImport, onExportJSON, onExportPNG }: Props) {
+export function TopBar({ docName, onRename, savedAt, onImport, onExportShear, onExportScene, onPlay, onShare, peers, self, live }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -36,8 +43,9 @@ export function TopBar({ docName, onRename, savedAt, onImport, onExportJSON, onE
 
   return (
     <header className="relative z-30 flex h-11 shrink-0 items-center gap-3 border-b border-white/5 bg-neutral-800/80 px-3 backdrop-blur-xl">
-      <div className="flex w-40 items-center">
+      <div className="flex w-44 items-center gap-2">
         <span className="text-[13px] font-semibold tracking-tight text-neutral-200">Shear</span>
+        {live && <PeerAvatars peers={peers} self={self} />}
       </div>
 
       <div className="flex flex-1 items-center justify-center">
@@ -55,11 +63,11 @@ export function TopBar({ docName, onRename, savedAt, onImport, onExportJSON, onE
         )}
       </div>
 
-      <div className="flex w-40 items-center justify-end gap-1">
+      <div className="flex w-44 items-center justify-end gap-1">
         <input
           ref={fileRef}
           type="file"
-          accept=".json,application/json"
+          accept=".shear,.json,application/json"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0]
@@ -68,8 +76,26 @@ export function TopBar({ docName, onRename, savedAt, onImport, onExportJSON, onE
           }}
         />
         <button
+          onClick={onPlay}
+          title="Preview (⇧⌘P)"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100"
+        >
+          <Play size={14} strokeWidth={1.8} />
+        </button>
+
+        <button
+          onClick={onShare}
+          title="Work together"
+          className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/10 hover:text-neutral-100 ${
+            live ? 'text-neutral-100' : 'text-neutral-400'
+          }`}
+        >
+          <Users size={14} strokeWidth={1.8} />
+        </button>
+
+        <button
           onClick={() => fileRef.current?.click()}
-          title="Import JSON"
+          title="Open .shear file"
           className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100"
         >
           <Upload size={14} strokeWidth={1.8} />
@@ -93,8 +119,9 @@ export function TopBar({ docName, onRename, savedAt, onImport, onExportJSON, onE
                 transition={{ duration: 0.22, ease: EASE }}
                 className="absolute right-0 top-9 w-52 overflow-hidden rounded-lg border border-white/10 bg-neutral-900/90 p-1 shadow-panel backdrop-blur-xl"
               >
-                <MenuItem icon={<FileJson size={13} strokeWidth={1.8} />} label="Export JSON" hint="Full design file" onClick={() => { setMenuOpen(false); onExportJSON() }} />
-                <MenuItem icon={<Image size={13} strokeWidth={1.8} />} label="Export scene as PNG" hint="One scene, rendered in Go" onClick={() => { setMenuOpen(false); onExportPNG() }} />
+                <MenuItem icon={<FileJson size={13} strokeWidth={1.8} />} label="Shear file" hint="Everything, shareable" onClick={() => { setMenuOpen(false); onExportShear() }} />
+                <MenuItem icon={<Image size={13} strokeWidth={1.8} />} label="Scene as image" hint="PNG or SVG" onClick={() => { setMenuOpen(false); onExportScene() }} />
+                <MenuItem icon={<FileCode2 size={13} strokeWidth={1.8} />} label="Scene as HTML" hint="Keeps the animations" onClick={() => { setMenuOpen(false); onExportScene() }} />
               </motion.div>
             )}
           </AnimatePresence>

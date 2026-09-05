@@ -1,7 +1,9 @@
 import { AlignCenter, AlignLeft, AlignRight, Copy, Trash2, X } from 'lucide-react'
-import type { CssFilters, Effect, Node, Scene, TextAlign } from '../types'
+import type { Adjust, Effect, Node, Scene, TextAlign } from '../types'
 import { NODE_TYPE_LABEL } from '../types'
-import { defaultCornerRadii, defaultFilters, uid } from '../utils'
+import { defaultCornerRadii, uid } from '../utils'
+import { defaultAdjust } from '../anim'
+import { TimelinePanel, Slider } from './Timeline'
 
 interface Props {
   node: Node | null
@@ -12,6 +14,10 @@ interface Props {
   onDuplicate: (id: string) => void
   onDelete: (id: string) => void
   onSelect: () => void
+  time: number
+  playing: boolean
+  onTime: (t: number) => void
+  onPlaying: (v: boolean) => void
 }
 
 export function RightPanel(props: Props) {
@@ -70,8 +76,8 @@ function NodeProps(props: Props & { node: Node }) {
         </div>
         <div className="grid grid-cols-2 gap-1.5">
           <NumField label="Rot" value={n.rotation} suffix="°" onChange={(v) => props.onUpdateNode(n.id, { rotation: v })} />
-          <SliderNum label="Opacity" value={Math.round(n.opacity * 100)} min={0} max={100} suffix="%" onChange={(v) => props.onUpdateNode(n.id, { opacity: v / 100 })} />
         </div>
+        <Slider label="Opacity" value={Math.round(n.opacity * 100)} min={0} max={100} suffix="%" onChange={(v) => props.onUpdateNode(n.id, { opacity: v / 100 })} />
       </Section>
 
       {(n.type === 'rect' || n.type === 'frame' || n.type === 'ellipse' || n.type === 'line') && (
@@ -125,12 +131,23 @@ function NodeProps(props: Props & { node: Node }) {
         </Section>
       )}
 
+      <Section title="Timeline">
+        <TimelinePanel
+          node={n}
+          time={props.time}
+          playing={props.playing}
+          onTime={props.onTime}
+          onPlay={props.onPlaying}
+          onUpdate={(patch) => props.onUpdateNode(n.id, patch)}
+        />
+      </Section>
+
       <Section title="Effects">
         <EffectsControls node={n} onUpdate={(patch) => props.onUpdateNode(n.id, patch)} />
       </Section>
 
-      <Section title="CSS Filters">
-        <FilterControls node={n} onUpdate={(patch) => props.onUpdateNode(n.id, patch)} />
+      <Section title="Adjustments">
+        <AdjustControls node={n} onUpdate={(patch) => props.onUpdateNode(n.id, patch)} />
       </Section>
 
       {n.type === 'text' && n.text && (
@@ -260,20 +277,6 @@ function ColorField({ value, onChange, disabled }: { value: string; onChange: (c
 }
 
 
-function SliderNum(props: { label: string; value: number; onChange: (v: number) => void; min: number; max: number; step?: number; suffix?: string }) {
-  const v = Math.min(props.max, Math.max(props.min, props.value))
-  return (
-    <label className="grid min-w-0 grid-cols-[52px_minmax(58px,1fr)_56px] items-center gap-2 rounded-md border border-white/10 bg-white/5 px-2 py-1.5">
-      <span className="truncate text-[10px] text-neutral-500">{props.label}</span>
-      <input type="range" min={props.min} max={props.max} step={props.step ?? 1} value={v} onChange={(e) => props.onChange(Number(e.target.value))} className="h-1 min-w-0 cursor-pointer appearance-none rounded-full bg-neutral-700 accent-white" />
-      <span className="flex min-w-0 items-center rounded border border-white/10 bg-neutral-950/40 px-1">
-        <input type="number" value={Math.round(v * 10) / 10} min={props.min} max={props.max} step={props.step ?? 1} onChange={(e) => props.onChange(clampNum(e.target.value, props.min, props.max))} onFocus={(e) => e.target.select()} className="w-full min-w-0 bg-transparent text-right text-[11px] tabular-nums text-neutral-300 outline-none" />
-        {props.suffix && <span className="ml-0.5 text-[9px] text-neutral-600">{props.suffix}</span>}
-      </span>
-    </label>
-  )
-}
-
 function PresetNumField(props: { label: string; value: number; options: number[]; onChange: (v: number) => void; min?: number }) {
   const id = `preset-${props.label}`
   return (
@@ -293,7 +296,7 @@ function CornerControls({ node, onUpdate }: { node: Node; onUpdate: (patch: Part
     const next = { ...r, [k]: v, linked: false }
     onUpdate({ cornerRadius: Math.max(next.tl, next.tr, next.br, next.bl), cornerRadii: next })
   }
-  return <div className="space-y-2"><div className="flex items-center justify-between"><span className="text-[11px] text-neutral-500">Linked corners</span><Toggle on={r.linked} onToggle={() => onUpdate({ cornerRadii: { ...r, linked: !r.linked } })} /></div><SliderNum label="All" value={r.linked ? r.tl : Math.max(r.tl, r.tr, r.br, r.bl)} min={0} max={max} onChange={setAll} /><div className="grid grid-cols-2 gap-1.5"><NumField label="TL" value={r.tl} min={0} onChange={(v) => setOne('tl', v)} /><NumField label="TR" value={r.tr} min={0} onChange={(v) => setOne('tr', v)} /><NumField label="BR" value={r.br} min={0} onChange={(v) => setOne('br', v)} /><NumField label="BL" value={r.bl} min={0} onChange={(v) => setOne('bl', v)} /></div><p className="text-[10px] leading-relaxed text-neutral-600">Drag the blue corner dots on-canvas. Hold Shift to change only that corner.</p></div>
+  return <div className="space-y-2"><div className="flex items-center justify-between"><span className="text-[11px] text-neutral-500">Linked corners</span><Toggle on={r.linked} onToggle={() => onUpdate({ cornerRadii: { ...r, linked: !r.linked } })} /></div><Slider label="All" value={r.linked ? r.tl : Math.max(r.tl, r.tr, r.br, r.bl)} min={0} max={max} onChange={setAll} /><div className="grid grid-cols-2 gap-1.5"><NumField label="TL" value={r.tl} min={0} onChange={(v) => setOne('tl', v)} /><NumField label="TR" value={r.tr} min={0} onChange={(v) => setOne('tr', v)} /><NumField label="BR" value={r.br} min={0} onChange={(v) => setOne('br', v)} /><NumField label="BL" value={r.bl} min={0} onChange={(v) => setOne('bl', v)} /></div><p className="text-[10px] leading-relaxed text-neutral-600">Drag the blue corner dots on-canvas. Hold Shift to change only that corner.</p></div>
 }
 
 function EffectsControls({ node, onUpdate }: { node: Node; onUpdate: (patch: Partial<Node>) => void }) {
@@ -302,13 +305,38 @@ function EffectsControls({ node, onUpdate }: { node: Node; onUpdate: (patch: Par
   const remove = (id: string) => onUpdate({ effects: effects.filter((e) => e.id !== id) })
   const addShadow = () => onUpdate({ effects: [...effects, { id: uid(), type: 'drop-shadow', visible: true, color: '#000000', x: 0, y: 8, blur: 24, spread: 0 }] })
   const addBlur = () => onUpdate({ effects: [...effects, { id: uid(), type: 'layer-blur', visible: true, blur: 4 }] })
-  return <div className="space-y-2">{effects.map((e) => <div key={e.id} className="space-y-1.5 rounded-lg border border-white/10 bg-white/[0.03] p-2"><div className="flex items-center gap-2"><Toggle on={e.visible} onToggle={() => update(e.id, { visible: !e.visible })} /><select value={e.type} onChange={(ev) => update(e.id, ev.target.value === 'layer-blur' || ev.target.value === 'background-blur' ? { type: ev.target.value as 'layer-blur' | 'background-blur', blur: 'blur' in e ? e.blur : 4 } as Partial<Effect> : { type: ev.target.value as 'drop-shadow' | 'inner-shadow', color: 'color' in e ? e.color : '#000000', x: 0, y: 8, blur: 'blur' in e ? e.blur : 24, spread: 0 } as Partial<Effect>)} className="min-w-0 flex-1 bg-transparent text-[11px] text-neutral-300 outline-none [&>option]:bg-neutral-900"><option value="drop-shadow">Drop shadow</option><option value="inner-shadow">Inner shadow</option><option value="layer-blur">Layer blur</option><option value="background-blur">Background blur</option></select><button onClick={() => remove(e.id)} className="text-neutral-600 hover:text-neutral-200"><X size={12} /></button></div>{'color' in e ? <div className="flex items-center gap-2"><ColorField value={e.color} onChange={(c) => update(e.id, { color: c })} /><NumField label="X" value={e.x} onChange={(v) => update(e.id, { x: v })} /><NumField label="Y" value={e.y} onChange={(v) => update(e.id, { y: v })} /></div> : null}{'spread' in e ? <div className="grid grid-cols-2 gap-1.5"><NumField label="Blur" value={e.blur} min={0} onChange={(v) => update(e.id, { blur: v })} /><NumField label="Spread" value={e.spread} onChange={(v) => update(e.id, { spread: v })} /></div> : <SliderNum label="Blur" value={e.blur} min={0} max={80} onChange={(v) => update(e.id, { blur: v })} />}</div>)}<div className="flex gap-1.5"><button onClick={addShadow} className="rounded-md bg-white/10 px-2 py-1 text-[11px] hover:bg-white/15">+ Shadow</button><button onClick={addBlur} className="rounded-md bg-white/10 px-2 py-1 text-[11px] hover:bg-white/15">+ Blur</button></div></div>
+  return <div className="space-y-2">{effects.map((e) => <div key={e.id} className="space-y-1.5 rounded-lg border border-white/10 bg-white/[0.03] p-2"><div className="flex items-center gap-2"><Toggle on={e.visible} onToggle={() => update(e.id, { visible: !e.visible })} /><select value={e.type} onChange={(ev) => update(e.id, ev.target.value === 'layer-blur' || ev.target.value === 'background-blur' ? { type: ev.target.value as 'layer-blur' | 'background-blur', blur: 'blur' in e ? e.blur : 4 } as Partial<Effect> : { type: ev.target.value as 'drop-shadow' | 'inner-shadow', color: 'color' in e ? e.color : '#000000', x: 0, y: 8, blur: 'blur' in e ? e.blur : 24, spread: 0 } as Partial<Effect>)} className="min-w-0 flex-1 bg-transparent text-[11px] text-neutral-300 outline-none [&>option]:bg-neutral-900"><option value="drop-shadow">Drop shadow</option><option value="inner-shadow">Inner shadow</option><option value="layer-blur">Layer blur</option><option value="background-blur">Background blur</option></select><button onClick={() => remove(e.id)} className="text-neutral-600 hover:text-neutral-200"><X size={12} /></button></div>{'color' in e ? <div className="flex items-center gap-2"><ColorField value={e.color} onChange={(c) => update(e.id, { color: c })} /><NumField label="X" value={e.x} onChange={(v) => update(e.id, { x: v })} /><NumField label="Y" value={e.y} onChange={(v) => update(e.id, { y: v })} /></div> : null}{'spread' in e ? <div className="grid grid-cols-2 gap-1.5"><NumField label="Blur" value={e.blur} min={0} onChange={(v) => update(e.id, { blur: v })} /><NumField label="Spread" value={e.spread} onChange={(v) => update(e.id, { spread: v })} /></div> : <Slider label="Blur" value={e.blur} min={0} max={80} onChange={(v) => update(e.id, { blur: v })} />}</div>)}<div className="flex gap-1.5"><button onClick={addShadow} className="rounded-md bg-white/10 px-2 py-1 text-[11px] hover:bg-white/15">+ Shadow</button><button onClick={addBlur} className="rounded-md bg-white/10 px-2 py-1 text-[11px] hover:bg-white/15">+ Blur</button></div></div>
 }
 
-function FilterControls({ node, onUpdate }: { node: Node; onUpdate: (patch: Partial<Node>) => void }) {
-  const f: CssFilters = { ...defaultFilters(), ...(node.filters ?? {}) }
-  const set = (patch: Partial<CssFilters>) => onUpdate({ filters: { ...f, ...patch } })
-  return <div className="space-y-1.5"><SliderNum label="Invert" value={f.invert} min={0} max={100} suffix="%" onChange={(v) => set({ invert: v })} /><SliderNum label="Gray" value={f.grayscale} min={0} max={100} suffix="%" onChange={(v) => set({ grayscale: v })} /><SliderNum label="Sepia" value={f.sepia} min={0} max={100} suffix="%" onChange={(v) => set({ sepia: v })} /><SliderNum label="Blur" value={f.blur} min={0} max={40} onChange={(v) => set({ blur: v })} /><SliderNum label="Bright" value={f.brightness} min={0} max={300} suffix="%" onChange={(v) => set({ brightness: v })} /><SliderNum label="Contrast" value={f.contrast} min={0} max={300} suffix="%" onChange={(v) => set({ contrast: v })} /><SliderNum label="Saturate" value={f.saturate} min={0} max={300} suffix="%" onChange={(v) => set({ saturate: v })} /><SliderNum label="Hue" value={f.hueRotate} min={-180} max={180} suffix="°" onChange={(v) => set({ hueRotate: v })} /></div>
+/**
+ * Image adjustments. Every slider is an offset from normal, so the centre
+ * (or zero) is always "untouched" and Reset puts everything back.
+ */
+function AdjustControls({ node, onUpdate }: { node: Node; onUpdate: (patch: Partial<Node>) => void }) {
+  const a: Adjust = { ...defaultAdjust(), ...(node.adjust ?? {}) }
+  const set = (patch: Partial<Adjust>) => onUpdate({ adjust: { ...a, ...patch } })
+  const touched = Object.values(a).some((v) => v !== 0)
+
+  return (
+    <div className="space-y-1.5">
+      <Slider label="Exposure" value={a.brightness} min={-100} max={100} onChange={(v) => set({ brightness: v })} />
+      <Slider label="Contrast" value={a.contrast} min={-100} max={100} onChange={(v) => set({ contrast: v })} />
+      <Slider label="Saturation" value={a.saturation} min={-100} max={100} onChange={(v) => set({ saturation: v })} />
+      <Slider label="Warmth" value={a.temperature} min={-100} max={100} onChange={(v) => set({ temperature: v })} />
+      <Slider label="Hue" value={a.hue} min={-180} max={180} suffix="\u00b0" onChange={(v) => set({ hue: v })} />
+      <Slider label="Blur" value={a.blur} min={0} max={50} step={0.5} onChange={(v) => set({ blur: v })} />
+      <Slider label="B&W" value={a.grayscale} min={0} max={100} suffix="%" onChange={(v) => set({ grayscale: v })} />
+      <Slider label="Invert" value={a.invert} min={0} max={100} suffix="%" onChange={(v) => set({ invert: v })} />
+      {touched && (
+        <button
+          onClick={() => onUpdate({ adjust: defaultAdjust() })}
+          className="w-full rounded-md py-1 text-[10px] text-neutral-500 transition-colors hover:bg-white/5 hover:text-neutral-300"
+        >
+          Reset
+        </button>
+      )}
+    </div>
+  )
 }
 
 function normalizeHex(c: string): string {

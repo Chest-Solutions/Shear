@@ -5,16 +5,25 @@ import type { Scene } from '../types'
 
 const EASE = [0.16, 1, 0.3, 1] as const
 
+export type SceneFormat = 'png' | 'svg' | 'html'
+
+const FORMATS: { id: SceneFormat; label: string; hint: string }[] = [
+  { id: 'png', label: 'PNG', hint: 'Flat image, 2×' },
+  { id: 'svg', label: 'SVG', hint: 'Vector, editable' },
+  { id: 'html', label: 'HTML', hint: 'Live, with animations' },
+]
+
 interface Props {
   open: boolean
   scenes: Scene[]
   defaultSceneId: string
   onClose: () => void
-  onExport: (sceneId: string) => Promise<void>
+  onExport: (sceneId: string, format: SceneFormat) => Promise<void>
 }
 
 export function ExportModal({ open, scenes, defaultSceneId, onClose, onExport }: Props) {
   const [selected, setSelected] = useState(defaultSceneId)
+  const [format, setFormat] = useState<SceneFormat>('png')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -30,7 +39,7 @@ export function ExportModal({ open, scenes, defaultSceneId, onClose, onExport }:
     setBusy(true)
     setError(null)
     try {
-      await onExport(selected)
+      await onExport(selected, format)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'export failed')
       setBusy(false)
@@ -59,7 +68,25 @@ export function ExportModal({ open, scenes, defaultSceneId, onClose, onExport }:
           >
             <div className="px-4 pt-4">
               <h2 className="text-[13px] font-medium text-neutral-100">Export scene</h2>
-              <p className="mt-0.5 text-[11px] text-neutral-500">One scene, rendered to PNG.</p>
+              <p className="mt-0.5 text-[11px] text-neutral-500">Rendered by the Go backend.</p>
+
+              <div className="mt-3 flex gap-0.5 rounded-lg border border-white/10 bg-white/5 p-0.5">
+                {FORMATS.map((f) => (
+                  <button
+                    key={f.id}
+                    title={f.hint}
+                    onClick={() => setFormat(f.id)}
+                    className={`relative flex-1 rounded-md py-1 text-[11px] transition-colors ${
+                      format === f.id ? 'text-neutral-900' : 'text-neutral-400 hover:text-neutral-100'
+                    }`}
+                  >
+                    {format === f.id && (
+                      <motion.span layoutId="fmt-active" transition={{ duration: 0.25, ease: EASE }} className="absolute inset-0 rounded-md bg-white" />
+                    )}
+                    <span className="relative">{f.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="max-h-56 space-y-0.5 overflow-y-auto p-2">
@@ -106,7 +133,7 @@ export function ExportModal({ open, scenes, defaultSceneId, onClose, onExport }:
                 className="flex items-center gap-1.5 rounded-md bg-white px-3.5 py-1.5 text-[12px] font-medium text-neutral-900 transition-colors hover:bg-neutral-200 disabled:opacity-60"
               >
                 {busy && <Loader2 size={12} className="animate-spin" />}
-                {busy ? 'Rendering' : 'Export PNG'}
+                {busy ? 'Rendering' : `Export ${format.toUpperCase()}`}
               </button>
             </div>
           </motion.div>

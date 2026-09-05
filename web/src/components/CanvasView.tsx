@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Maximize2, Minus, Plus } from 'lucide-react'
-import type { Node, Scene, Tool } from '../types'
+import type { Node, Peer, Scene, Tool } from '../types'
 import { drawScene, screenToWorld, worldToScreen, type Viewport } from '../render'
 import { clamp, defaultCornerRadii, makeNode, nextName, round1 } from '../utils'
+import { PresenceLayer } from './Presence'
 
 // ---- affine matrix helpers (row-major 2x3) ----
 interface Mat {
@@ -127,6 +128,9 @@ interface Props {
   onFit: () => void
   onDuplicate: (id: string) => void
   onDelete: (id: string) => void
+  /** Live-session extras: other designers' cursors and our own broadcast. */
+  peers?: Peer[]
+  onPointer?: (p: { x: number; y: number }) => void
 }
 
 export function CanvasView(props: Props) {
@@ -482,6 +486,11 @@ export function CanvasView(props: Props) {
     const onMove = (e: MouseEvent) => {
       const drag = dragRef.current
       const canvas = canvasRef.current
+      if (canvas && props.onPointer) {
+        const rect = canvas.getBoundingClientRect()
+        const wp = screenToWorld(viewport, e.clientX - rect.left, e.clientY - rect.top)
+        props.onPointer(wp)
+      }
       if (!drag || !canvas) {
         // hover cursor
         if (canvas && !spaceDown) {
@@ -849,6 +858,9 @@ export function CanvasView(props: Props) {
         onContextMenu={onContextMenu}
         style={{ cursor: spaceDown ? 'grab' : undefined }}
       />
+      {props.peers && props.peers.length > 0 && (
+        <PresenceLayer peers={props.peers} viewport={viewport} scene={scene} />
+      )}
       {overlay}
       {contextMenu}
 
