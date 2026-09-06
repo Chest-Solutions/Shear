@@ -145,6 +145,7 @@ export function CanvasView(props: Props) {
   const gestureDirty = useRef(false)
   const editingTextRef = useRef<string | null>(null)
   editingTextRef.current = editingId
+  const [viewSize, setViewSize] = useState({ w: 0, h: 0 })
 
   // ---- viewport helpers ----
   const fitView = useCallback(() => {
@@ -152,13 +153,29 @@ export function CanvasView(props: Props) {
     if (!el) return
     const { width: vw, height: vh } = el.getBoundingClientRect()
     const pad = 72
-    const zoom = clamp(Math.min((vw - pad * 2) / scene.width, (vh - pad * 2) / scene.height), 0.05, 4)
+    const zoom = clamp(Math.min((vw - pad * 2) / scene.width, (vh - pad * 2) / scene.height), 0.02, 64)
     onViewport({ zoom, panX: (vw - scene.width * zoom) / 2, panY: (vh - scene.height * zoom) / 2 })
   }, [scene.width, scene.height, onViewport])
 
   useEffect(() => {
     fitView()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Keep the backing store in sync with the wrap size. Without this the
+  // scene scale looks "stuck" until the next pan/zoom because we only
+  // resized the canvas when other deps changed.
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect()
+      setViewSize({ w: r.width, h: r.height })
+    })
+    ro.observe(el)
+    const r = el.getBoundingClientRect()
+    setViewSize({ w: r.width, h: r.height })
+    return () => ro.disconnect()
   }, [])
 
   // ---- drawing ----
@@ -215,7 +232,7 @@ export function CanvasView(props: Props) {
           ctx.stroke()
         }
         if ((node.type === 'rect' || node.type === 'frame') && node.width > 20 && node.height > 20) {
-          const rs = cornerRadii(node)
+          const rs = clampedRadii(node)
           const cornerPts = [
             { id: 'tl', x: rs.tl, y: rs.tl },
             { id: 'tr', x: node.width - rs.tr, y: rs.tr },
@@ -267,7 +284,7 @@ export function CanvasView(props: Props) {
       }
       ctx.restore()
     }
-  }, [scene, selectionId, viewport, preview, tool, guides])
+  }, [scene, selectionId, viewport, preview, tool, guides, viewSize])
 
   // ---- wheel (zoom / pan), non-passive ----
   useEffect(() => {
@@ -280,7 +297,7 @@ export function CanvasView(props: Props) {
         const mx = e.clientX - rect.left
         const my = e.clientY - rect.top
         const factor = Math.exp(-e.deltaY * 0.0022)
-        const zoom = clamp(viewport.zoom * factor, 0.05, 4)
+        const zoom = clamp(viewport.zoom * factor, 0.02, 64)
         const wx = (mx - viewport.panX) / viewport.zoom
         const wy = (my - viewport.panY) / viewport.zoom
         onViewport({ zoom, panX: mx - wx * zoom, panY: my - wy * zoom })
@@ -346,7 +363,7 @@ export function CanvasView(props: Props) {
   const cornerHit = (wpt: { x: number; y: number }): CornerId | null => {
     const hit = selectedWorld()
     if (!hit || (hit.node.type !== 'rect' && hit.node.type !== 'frame')) return null
-    const rs = cornerRadii(hit.node)
+    const rs = clampedRadii(hit.node)
     const pts: { id: CornerId; x: number; y: number }[] = [
       { id: 'tl', x: rs.tl, y: rs.tl },
       { id: 'tr', x: hit.node.width - rs.tr, y: rs.tr },
@@ -404,7 +421,7 @@ export function CanvasView(props: Props) {
             startWorld: wpt,
             startClient: { x: e.clientX, y: e.clientY },
             corner,
-            startRadii: cornerRadii(n),
+            startRadii: clampedRadii(n),
             nodeStart: { x: n.x, y: n.y, w: n.width, h: n.height, flip: !!n.flip },
           }
           return
@@ -573,15 +590,24 @@ export function CanvasView(props: Props) {
 
         let { x, y, w, h, flip } = { x: n0.x, y: n0.y, w: n0.w, h: n0.h, flip: n0.flip }
         const hd = drag.handle
-        if (hd.includes('e')) w = n0.w + ldx
-        if (hd.includes('s')) h = n0.h + ldy
-        if (hd.includes('w')) {
-          w = n0.w - ldx
-          x = n0.x + ldx
-        }
-        if (hd.includes('n')) {
-          h = n0.h - ldy
-          y = n0.y + ldy
+        const alt = e.altKey
+        if (alt) {
+          // Scale from the center: the opposite edge moves as much as this one.
+          if (hd.includes('e')) { w = n0.w + ldx * 2; x = n0.x - ldx }
+          if (hd.includes('s')) { h = n0.h + ldy * 2; y = n0.y - ldy }
+          if (hd.includes('w')) { w = n0.w - ldx * 2; x = n0.x + ldx }
+          if (hd.includes('n')) { h = n0.h - ldy * 2; y = n0.y + ldy }
+        } else {
+          if (hd.includes('e')) w = n0.w + ldx
+          if (hd.includes('s')) h = n0.h + ldy
+          if (hd.includes('w')) {
+            w = n0.w - ldx
+            x = n0.x + ldx
+          }
+          if (hd.includes('n')) {
+            h = n0.h - ldy
+            y = n0.y + ldy
+          }
         }
         // Photoshop/Figma-style square lock while scaling: Shift makes W and H equal,
         // not locked to the old aspect ratio.
@@ -589,8 +615,13 @@ export function CanvasView(props: Props) {
           const size = Math.max(Math.abs(w), Math.abs(h))
           w = size
           h = size
-          if (hd.includes('w')) x = n0.x + n0.w - w
-          if (hd.includes('n')) y = n0.y + n0.h - h
+          if (alt) {
+            x = n0.x + n0.w / 2 - w / 2
+            y = n0.y + n0.h / 2 - h / 2
+          } else {
+            if (hd.includes('w')) x = n0.x + n0.w - w
+            if (hd.includes('n')) y = n0.y + n0.h - h
+          }
         }
         // line: crossing the anchor flips the direction
         if (hd.includes('w') && w < 0) {
@@ -614,6 +645,7 @@ export function CanvasView(props: Props) {
               n.width = w
               n.height = h
               if (n.type === 'line') n.flip = flip
+              clampRadiiInPlace(n)
             }
           },
           false,
@@ -650,7 +682,7 @@ export function CanvasView(props: Props) {
         props.mutate((nodes) => {
           const n = findAny(nodes, selectionId)
           if (n) {
-            const next = { ...cornerRadii(n), linked: !e.shiftKey }
+            const next = { ...clampedRadii(n), linked: !e.shiftKey }
             if (e.shiftKey) next[drag.corner!] = r
             else next.tl = next.tr = next.br = next.bl = r
             n.cornerRadii = next
@@ -902,7 +934,7 @@ export function CanvasView(props: Props) {
     const { width: vw, height: vh } = el.getBoundingClientRect()
     const cx = vw / 2
     const cy = vh / 2
-    const zoom = clamp(viewport.zoom * factor, 0.05, 4)
+    const zoom = clamp(viewport.zoom * factor, 0.02, 64)
     const wx = (cx - viewport.panX) / viewport.zoom
     const wy = (cy - viewport.panY) / viewport.zoom
     onViewport({ zoom, panX: cx - wx * zoom, panY: cy - wy * zoom })

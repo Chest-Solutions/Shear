@@ -7,6 +7,7 @@ import { TopBar } from './components/TopBar'
 import { Toolbar } from './components/Toolbar'
 import { LeftPanel } from './components/LeftPanel'
 import { RightPanel } from './components/RightPanel'
+import { Dock } from './components/Dock'
 import { CanvasView, findAny } from './components/CanvasView'
 import { ExportModal, type SceneFormat } from './components/ExportModal'
 import { PreviewOverlay } from './components/PreviewOverlay'
@@ -51,6 +52,10 @@ export default function App() {
   const [time, setTime] = useState(0)
   const [timelinePlaying, setTimelinePlaying] = useState(false)
   const [joined, setJoined] = useState(false)
+  const [leftOpen, setLeftOpen] = useState(true)
+  const [rightOpen, setRightOpen] = useState(true)
+  const [leftW, setLeftW] = useState(224)
+  const [rightW, setRightW] = useState(288)
   const [myName, setMyName] = useState(
     () => (typeof window !== 'undefined' ? sessionStorage.getItem('shear.name') ?? '' : ''),
   )
@@ -657,7 +662,7 @@ export default function App() {
     if (!el) return
     const { width: vw, height: vh } = el.getBoundingClientRect()
     const pad = 72
-    const zoom = clamp(Math.min((vw - pad * 2) / scene.width, (vh - pad * 2) / scene.height), 0.05, 4)
+    const zoom = clamp(Math.min((vw - pad * 2) / scene.width, (vh - pad * 2) / scene.height), 0.02, 64)
     setViewport({ zoom, panX: (vw - scene.width * zoom) / 2, panY: (vh - scene.height * zoom) / 2 })
   }, [scene.width, scene.height])
 
@@ -687,35 +692,43 @@ export default function App() {
         peers={collab.peers}
         self={collab.self}
         live={live}
+        leftOpen={leftOpen}
+        rightOpen={rightOpen}
+        onToggleLeft={() => setLeftOpen((v) => !v)}
+        onToggleRight={() => setRightOpen((v) => !v)}
       />
 
       <div className="flex min-h-0 flex-1">
-        <LeftPanel
-          scene={scene}
-          selectedId={selectionId}
-          onSelect={(id) => setSelectionId(id)}
-          onRenameNode={(id, name) => updateNode(id, { name })}
-          onToggleVisible={(id) =>
-            updateNode(id, { visible: !findAny(scene.nodes, id)?.visible })
-          }
-          onToggleLock={(id) => updateNode(id, { locked: !findAny(scene.nodes, id)?.locked })}
-          onReorder={reorderNode}
-          scenes={doc.scenes}
-          activeSceneId={currentSceneId}
-          onSelectScene={(id) => {
-            if (editingId) closeTextEdit()
-            apply((d) => (d.selectedSceneId = id))
-            setSelectionId(null)
-          }}
-          onAddScene={addScene}
-          onRenameScene={(id, name) =>
-            apply((d) => {
-              const s = d.scenes.find((x) => x.id === id)
-              if (s) s.name = name
-            })
-          }
-          onDeleteScene={deleteScene}
-        />
+        {leftOpen && (
+          <Dock side="left" width={leftW} min={72} max={1600} onWidth={setLeftW} onClose={() => setLeftOpen(false)}>
+            <LeftPanel
+              scene={scene}
+              selectedId={selectionId}
+              onSelect={(id) => setSelectionId(id)}
+              onRenameNode={(id, name) => updateNode(id, { name })}
+              onToggleVisible={(id) =>
+                updateNode(id, { visible: !findAny(scene.nodes, id)?.visible })
+              }
+              onToggleLock={(id) => updateNode(id, { locked: !findAny(scene.nodes, id)?.locked })}
+              onReorder={reorderNode}
+              scenes={doc.scenes}
+              activeSceneId={currentSceneId}
+              onSelectScene={(id) => {
+                if (editingId) closeTextEdit()
+                apply((d) => (d.selectedSceneId = id))
+                setSelectionId(null)
+              }}
+              onAddScene={addScene}
+              onRenameScene={(id, name) =>
+                apply((d) => {
+                  const s = d.scenes.find((x) => x.id === id)
+                  if (s) s.name = name
+                })
+              }
+              onDeleteScene={deleteScene}
+            />
+          </Dock>
+        )}
 
         <main className="relative min-w-0 flex-1">
           <div className="canvas-wrap absolute inset-0">
@@ -745,20 +758,24 @@ export default function App() {
           <Toolbar tool={tool} onTool={setTool} />
         </main>
 
-        <RightPanel
-          node={selectedNode}
-          scene={scene}
-          onUpdateNode={updateNode}
-          onUpdateText={updateText}
-          onUpdateScene={updateSceneProps}
-          onDuplicate={duplicateNode}
-          onDelete={deleteNode}
-          onSelect={() => setSelectionId(null)}
-          time={time}
-          playing={timelinePlaying}
-          onTime={setTime}
-          onPlaying={setTimelinePlaying}
-        />
+        {rightOpen && (
+          <Dock side="right" width={rightW} min={72} max={1600} onWidth={setRightW} onClose={() => setRightOpen(false)}>
+            <RightPanel
+              node={selectedNode}
+              scene={scene}
+              onUpdateNode={updateNode}
+              onUpdateText={updateText}
+              onUpdateScene={updateSceneProps}
+              onDuplicate={duplicateNode}
+              onDelete={deleteNode}
+              onSelect={() => setSelectionId(null)}
+              time={time}
+              playing={timelinePlaying}
+              onTime={setTime}
+              onPlaying={setTimelinePlaying}
+            />
+          </Dock>
+        )}
       </div>
 
       <ExportModal

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -34,6 +36,18 @@ func TestBroadcastSkipsSender(t *testing.T) {
 	}
 	if len(b.ch) != 1 {
 		t.Error("other peer should receive the event")
+	}
+}
+
+func TestPublicHostPrefersForwarded(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/api/sessions", nil)
+	r.Header.Set("X-Forwarded-Host", "example.ngrok.app")
+	r.Header.Set("X-Forwarded-Proto", "https")
+	if got := publicHost(r); got != "example.ngrok.app" {
+		t.Fatalf("publicHost = %q", got)
+	}
+	if got := publicScheme(r); got != "https" {
+		t.Fatalf("publicScheme = %q", got)
 	}
 }
 

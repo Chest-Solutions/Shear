@@ -15,7 +15,13 @@ export async function createSession(document: Document): Promise<Session> {
     body: JSON.stringify({ document }),
   })
   if (!res.ok) throw new Error('could not start the session')
-  return (await res.json()) as Session
+  const s = (await res.json()) as Session
+  // The share link must match how THIS browser reached the server, so a
+  // port-forward / tunnel origin is what guests actually open.
+  if (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.startsWith('file:')) {
+    s.url = `${window.location.origin}/join/${s.id}`
+  }
+  return s
 }
 
 export interface CollabState {

@@ -1,6 +1,8 @@
 # build output
 dist/
-web/dist/
+web/dist/**
+!web/dist/
+!web/dist/index.html
 node_modules/
 *.exe
 /shear

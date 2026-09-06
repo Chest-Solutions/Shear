@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Download, FileCode2, FileJson, Image, Play, Upload, Users } from 'lucide-react'
+import { Download, FileCode2, FileJson, Image, PanelLeft, PanelRight, Play, Upload, Users } from 'lucide-react'
 import type { Peer } from '../types'
 import { PeerAvatars } from './Presence'
 
@@ -16,11 +16,15 @@ interface Props {
   peers: Peer[]
   self: Peer | null
   live: boolean
+  leftOpen: boolean
+  rightOpen: boolean
+  onToggleLeft: () => void
+  onToggleRight: () => void
 }
 
 const EASE = [0.25, 0.1, 0.25, 1] as const
 
-export function TopBar({ docName, onRename, savedAt, onImport, onExportShear, onExportScene, onPlay, onShare, peers, self, live }: Props) {
+export function TopBar({ docName, onRename, savedAt, onImport, onExportShear, onExportScene, onPlay, onShare, peers, self, live, leftOpen, rightOpen, onToggleLeft, onToggleRight }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -43,7 +47,14 @@ export function TopBar({ docName, onRename, savedAt, onImport, onExportShear, on
 
   return (
     <header className="relative z-30 flex h-11 shrink-0 items-center gap-3 border-b border-white/5 bg-neutral-800/80 px-3 backdrop-blur-xl">
-      <div className="flex w-44 items-center gap-2">
+      <div className="flex w-52 items-center gap-2">
+        <button
+          title={leftOpen ? 'Hide layers' : 'Show layers'}
+          onClick={onToggleLeft}
+          className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/10 hover:text-neutral-100 ${leftOpen ? 'text-neutral-200' : 'text-neutral-500'}`}
+        >
+          <PanelLeft size={14} strokeWidth={1.8} />
+        </button>
         <span className="text-[13px] font-semibold tracking-tight text-neutral-200">Shear</span>
         {live && <PeerAvatars peers={peers} self={self} />}
       </div>
@@ -63,7 +74,14 @@ export function TopBar({ docName, onRename, savedAt, onImport, onExportShear, on
         )}
       </div>
 
-      <div className="flex w-44 items-center justify-end gap-1">
+      <div className="flex w-56 items-center justify-end gap-1">
+        <button
+          title={rightOpen ? 'Hide inspector' : 'Show inspector'}
+          onClick={onToggleRight}
+          className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/10 hover:text-neutral-100 ${rightOpen ? 'text-neutral-200' : 'text-neutral-500'}`}
+        >
+          <PanelRight size={14} strokeWidth={1.8} />
+        </button>
         <input
           ref={fileRef}
           type="file"

@@ -22,7 +22,7 @@ interface Props {
 
 export function RightPanel(props: Props) {
   return (
-    <aside className="flex w-72 min-w-64 max-w-[520px] shrink-0 resize-x flex-col overflow-auto border-l border-white/5 bg-neutral-900/60 backdrop-blur-xl">
+    <aside className="flex h-full min-h-0 w-full flex-col overflow-auto">
       {props.node ? <NodeProps {...props} node={props.node} /> : <SceneProps {...props} scene={props.scene} />}
     </aside>
   )

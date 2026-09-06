@@ -58,8 +58,10 @@ go run .
 # open http://localhost:8080
 ```
 
-Environment variables: `SHEAR_ADDR` (default `:8080`), `SHEAR_DATA`
-(default `data/`), `SHEAR_DIST` (default `web/dist`).
+Environment variables: `SHEAR_ADDR` (default `0.0.0.0:8080` so port-forwarding
+and LAN joins work), `SHEAR_DATA` (default `data/`), `SHEAR_DIST`
+(default `web/dist`), `SHEAR_PUBLIC_HOST` (optional `host:port` used in share
+links).
 
 ### Desktop app (webview)
 
@@ -68,9 +70,11 @@ go build -tags webview -o shear .
 ./shear
 ```
 
-This opens a native window (WKWebView / WebKitGTK / WebView2) with the Go
-backend running in-process on a local port. The plain build is just the
-server.
+GitHub Releases attach **`shear.exe`** (Windows, editor baked in). Double-click
+it — the site is previewed in Microsoft Edge WebView2.
+
+`go run .` does the same locally. The backend listens on `0.0.0.0:8080` so
+port-forwarded guests can join. `SHEAR_HEADLESS=1` is server-only.
 
 ## Architecture
 

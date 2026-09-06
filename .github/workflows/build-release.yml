@@ -1,8 +1,8 @@
 name: build-release
 
-# Every pushed commit produces a new GitHub release containing the app:
-# the Go web server binary (serves the editor + API) plus the built
-# frontend (web/dist), zipped per platform.
+# Every pushed commit produces a GitHub release. Windows gets a
+# double-clickable shear.exe (editor baked in). Other platforms get a
+# matching binary plus a zip.
 on:
   push:
 
@@ -20,9 +20,13 @@ jobs:
           go-version-file: go.mod
 
       - name: Vet
+        env:
+          CGO_ENABLED: "0"
         run: go vet ./...
 
       - name: Test
+        env:
+          CGO_ENABLED: "0"
         run: go test ./...
 
   build:
@@ -60,30 +64,35 @@ jobs:
         run: |
           npm ci
           npm run build
+          rm -rf ../ui
+          cp -r dist ../ui
 
-      - name: Build server
+      - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
           out="shear"
-          [ "$GOOS" = "windows" ] && out="shear.exe"
-          go build -trimpath -ldflags="-s -w" -o "bin/$out" .
-
-      - name: Package
-        run: |
-          out="bin/shear"
-          [ "${{ matrix.goos }}" = "windows" ] && out="bin/shear.exe"
-          mkdir -p pkg/web
-          cp "$out" pkg/
-          cp -r web/dist pkg/web/dist
-          (cd pkg && zip -qr "../shear-${{ matrix.goos }}-${{ matrix.goarch }}.zip" .)
+          ldflags="-s -w"
+          if [ "$GOOS" = "windows" ]; then
+            out="shear.exe"
+            ldflags="-s -w -H windowsgui"
+          fi
+          mkdir -p bin release-files
+          go build -trimpath -ldflags="$ldflags" -o "bin/$out" .
+          if [ "$GOOS" = "windows" ]; then
+            cp "bin/shear.exe" "release-files/shear.exe"
+            cp "bin/shear.exe" "release-files/shear-windows-${GOARCH}.exe"
+          else
+            cp "bin/$out" "release-files/shear-${GOOS}-${GOARCH}"
+          fi
+          (cd bin && zip -qr "../release-files/shear-${GOOS}-${GOARCH}.zip" "$out")
 
       - uses: actions/upload-artifact@v4
         with:
           name: shear-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: shear-${{ matrix.goos }}-${{ matrix.goarch }}.zip
+          path: release-files/
 
   release:
     needs: build
@@ -102,17 +111,24 @@ jobs:
           sha="$(git rev-parse --short HEAD)"
           subject="$(git log -1 --pretty=%s)"
           author="$(git log -1 --pretty=%an)"
-          files=""
-          for f in artifacts/*/*; do files="$files $f"; done
+          mkdir -p upload
+          # Flatten artifacts. Prefer the Windows exe at the top of the list.
+          find artifacts -type f -print0 | while IFS= read -r -d '' f; do
+            cp "$f" "upload/$(basename "$f")"
+          done
+          files=$(ls -1 upload/*)
           gh release create "run-${{ github.run_number }}" \
             --title "Shear $sha · $subject" \
             --notes "Commit $sha by $author on \`${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}\`
 
-          Run: \`./shear\` (or \`shear.exe\`) — serves the editor + API on :8080.
+          **Windows:** download \`shear.exe\` and double-click. The editor is baked in (Microsoft Edge WebView2).
 
-          | Platform |
+          **macOS / Linux:** download the binary for your arch, \`chmod +x\`, run it.
+
+          The app listens on \`0.0.0.0:8080\` so port-forwarding works.
+
+          | Asset |
           | --- |
-          | linux-amd64 · linux-arm64 · darwin-amd64 · darwin-arm64 · windows-amd64 |
-
-          Each zip contains the \`shear\` server and \`web/dist\` (the editor). The desktop webview shell (go build -tags webview) is built locally — it needs the system webview libraries." \
+          | \`shear.exe\` · windows-amd64 |
+          | linux-amd64 · linux-arm64 · darwin-amd64 · darwin-arm64 |" \
             $files

@@ -25,13 +25,20 @@ import (
 )
 
 func main() {
-	// Find a free local port for the in-process backend.
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	// Bind every interface so a forwarded port (or a LAN peer) can reach
+	// the in-process backend. The native window still loads 127.0.0.1.
+	addr := os.Getenv("SHEAR_ADDR")
+	if addr == "" {
+		addr = "0.0.0.0:8080"
+	}
+	l, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatal(err)
+		l, err = net.Listen("tcp", "0.0.0.0:0")
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
 
 	dataDir := os.Getenv("SHEAR_DATA")
 	if dataDir == "" {
@@ -43,10 +50,10 @@ func main() {
 		distDir = "web/dist"
 	}
 
-	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", port), Handler: app.NewHandler(dataDir, distDir)}
+	srv := &http.Server{Handler: app.NewHandler(dataDir, distDir)}
 	go func() {
-		log.Printf("backend on 127.0.0.1:%d (data: %s, web: %s)", port, dataDir, distDir)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("backend on %s (data: %s, web: %s)", l.Addr(), dataDir, distDir)
+		if err := srv.Serve(l); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
 	}()
@@ -67,7 +74,8 @@ func main() {
 		}
 	}
 
-	window := wv.New(false)
+	// WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux.
+	window := wv.New(true)
 	window.SetTitle("Shear")
 	window.SetSize(1440, 900, wv.HintNone)
 	window.Navigate(start)

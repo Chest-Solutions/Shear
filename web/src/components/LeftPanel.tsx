@@ -73,7 +73,7 @@ export function LeftPanel(props: Props) {
     ))
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-white/5 bg-neutral-900/60 backdrop-blur-xl">
+    <aside className="flex h-full min-h-0 w-full flex-col">
       <div className="flex items-center justify-between px-3 pb-1 pt-3">
         <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">Layers</span>
       </div>

@@ -24,3 +24,20 @@ func TestJoinRouteDoesNotRedirect(t *testing.T) {
 		}
 	}
 }
+
+func TestCORSPreflight(t *testing.T) {
+	dist := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dist, "index.html"), []byte("<html>shear</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(t.TempDir(), dist)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/api/sessions", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != 204 {
+		t.Fatalf("OPTIONS = %d, want 204", rec.Code)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatal("missing CORS allow origin")
+	}
+}

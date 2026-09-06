@@ -158,14 +158,34 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	sess := s.Hub.Create(req.Document, r.Host)
 
-	// The share link has to work from another machine, so prefer the LAN
-	// address of this host over whatever the local client asked for.
-	host := ShareHost(r.Host)
+	// Prefer the origin the browser actually used (X-Forwarded-* when
+	// sitting behind a tunnel / port-forward, else the request Host).
+	// Falling back to the LAN address covers a host that opened the
+	// editor at localhost.
+	host := publicHost(r)
+	scheme := publicScheme(r)
 	writeJSON(w, 200, createSessionResponse{
 		ID:   sess.ID,
-		URL:  fmt.Sprintf("http://%s/join/%s", host, sess.ID),
+		URL:  fmt.Sprintf("%s://%s/join/%s", scheme, host, sess.ID),
 		Name: sess.Name,
 	})
+}
+
+func publicScheme(r *http.Request) string {
+	if v := r.Header.Get("X-Forwarded-Proto"); v != "" {
+		return strings.Split(v, ",")[0]
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+func publicHost(r *http.Request) string {
+	if v := r.Header.Get("X-Forwarded-Host"); v != "" {
+		return strings.TrimSpace(strings.Split(v, ",")[0])
+	}
+	return ShareHost(r.Host)
 }
 
 func (s *Server) handleSessionInfo(w http.ResponseWriter, r *http.Request) {

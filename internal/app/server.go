@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
+
+// EmbeddedDist is the editor UI baked into the binary (set from main).
+var EmbeddedDist fs.FS
 
 // Server holds the API dependencies.
 type Server struct {
@@ -42,7 +47,31 @@ func NewHandler(dataDir, distDir string) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/presence", s.handlePresence)
 	mux.HandleFunc("POST /api/sessions/{id}/document", s.handleSessionDoc)
 
-	return s.withStatic(mux)
+	mux.HandleFunc("GET /api/net", s.handleNet)
+
+	return s.withCORS(s.withStatic(mux))
+}
+
+func (s *Server) withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(204)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) handleNet(w http.ResponseWriter, r *http.Request) {
+	host := ShareHost(r.Host)
+	writeJSON(w, 200, map[string]any{
+		"host":    host,
+		"lan":     lanIP(),
+		"request": r.Host,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -161,38 +190,56 @@ func (s *Server) handleExportHTML(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, RenderSceneHTML(req.Scene))
 }
 
-// withStatic serves the built frontend from DistDir with an SPA fallback.
+func (s *Server) openDist() fs.FS {
+	if s.DistDir != "" {
+		if _, err := os.Stat(filepath.Join(s.DistDir, "index.html")); err == nil {
+			return os.DirFS(s.DistDir)
+		}
+	}
+	if EmbeddedDist != nil {
+		if _, err := fs.Stat(EmbeddedDist, "index.html"); err == nil {
+			return EmbeddedDist
+		}
+	}
+	return nil
+}
+
+// withStatic serves the built frontend (disk or embedded) with an SPA fallback.
 func (s *Server) withStatic(api http.Handler) http.Handler {
-	dist := s.DistDir
-	if fi, err := os.Stat(dist); err != nil || !fi.IsDir() {
+	dist := s.openDist()
+	if dist == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeErr(w, 503, "frontend not built — run: cd web && npm ci && npm run build")
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				api.ServeHTTP(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(503)
+			_, _ = io.WriteString(w, `<!doctype html><meta charset="utf-8"><title>Shear</title>
+<body style="margin:0;background:#171717;color:#d4d4d4;font:14px/1.5 system-ui;display:grid;place-items:center;min-height:100vh">
+<p>Frontend is not built. Run <code>cd web && npm ci && npm run build</code> then restart Shear.</p>
+</body>`)
 		})
 	}
-	index := filepath.Join(dist, "index.html")
-	fs := http.FileServer(http.Dir(dist))
+	index, _ := fs.ReadFile(dist, "index.html")
+	fileServer := http.FileServer(http.FS(dist))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		if strings.HasPrefix(p, "/api/") {
 			api.ServeHTTP(w, r)
 			return
 		}
-		full := filepath.Join(dist, filepath.Clean(strings.TrimPrefix(p, "/")))
-		if p != "/" {
-			if st, err := os.Stat(full); err == nil && !st.IsDir() {
-				fs.ServeHTTP(w, r)
+		rel := strings.TrimPrefix(path.Clean(p), "/")
+		if rel != "" && rel != "." {
+			if f, err := dist.Open(rel); err == nil {
+				_ = f.Close()
+				fileServer.ServeHTTP(w, r)
 				return
 			}
 		}
-		// SPA fallback for "/" and for client routes like /join/<id>.
-		//
-		// This serves index.html directly rather than rewriting the path
-		// and handing it to http.FileServer: FileServer canonicalises a
-		// request for "index.html" by redirecting to "./", which on a
-		// route like /join/<id> redirects forever ("redirected too many
-		// times") instead of booting the app.
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
-		http.ServeFile(w, r, index)
+		w.WriteHeader(200)
+		_, _ = w.Write(index)
 	})
 }
