@@ -1006,6 +1006,25 @@ function cornerRadii(n: Node) {
   return n.cornerRadii ? { ...defaultCornerRadii(fallback), ...n.cornerRadii } : defaultCornerRadii(fallback)
 }
 
+function clampedRadii(n: Node) {
+  const r = cornerRadii(n)
+  const max = Math.max(0, Math.min(n.width, n.height) / 2)
+  return {
+    ...r,
+    tl: Math.min(r.tl, max),
+    tr: Math.min(r.tr, max),
+    br: Math.min(r.br, max),
+    bl: Math.min(r.bl, max),
+  }
+}
+
+function clampRadiiInPlace(n: Node) {
+  if (n.type !== 'rect' && n.type !== 'frame') return
+  const r = clampedRadii(n)
+  n.cornerRadii = r
+  n.cornerRadius = r.linked ? r.tl : Math.max(r.tl, r.tr, r.br, r.bl)
+}
+
 function flattenNodes(nodes: Node[], exceptId: string | null, out: Node[] = []): Node[] {
   for (const n of nodes) {
     if (n.id !== exceptId && n.visible) out.push(n)
