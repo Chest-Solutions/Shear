@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Check, Copy, Users } from 'lucide-react'
 import type { Peer } from '../types'
@@ -25,11 +25,17 @@ interface Props {
  */
 export function ShareSheet({ open, onClose, url, starting, peers, self, name, onName, onStart, onEnd }: Props) {
   const [copied, setCopied] = useState(false)
+  const [link, setLink] = useState(url ?? '')
+
+  useEffect(() => {
+    if (url) setLink(url)
+  }, [url])
 
   const copy = async () => {
-    if (!url) return
+    const value = link || url
+    if (!value) return
     try {
-      await navigator.clipboard.writeText(url)
+      await navigator.clipboard.writeText(value)
     } catch {
       /* clipboard blocked — the field is selectable */
     }

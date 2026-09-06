@@ -16,10 +16,17 @@ export async function createSession(document: Document): Promise<Session> {
   })
   if (!res.ok) throw new Error('could not start the session')
   const s = (await res.json()) as Session
-  // The share link must match how THIS browser reached the server, so a
-  // port-forward / tunnel origin is what guests actually open.
-  if (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.startsWith('file:')) {
-    s.url = `${window.location.origin}/join/${s.id}`
+  // Never rewrite a share link to loopback — the desktop WebView loads
+  // 127.0.0.1, but guests need the LAN / forwarded host the server picked.
+  // If this client reached the app through a real origin (tunnel, public
+  // IP), that origin is what guests should open.
+  if (typeof window !== 'undefined') {
+    const origin = window.location.origin
+    const host = window.location.hostname
+    const loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+    if (origin && !origin.startsWith('file:') && !loopback) {
+      s.url = `${origin}/join/${s.id}`
+    }
   }
   return s
 }

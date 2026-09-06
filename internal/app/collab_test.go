@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,6 +37,19 @@ func TestBroadcastSkipsSender(t *testing.T) {
 	}
 	if len(b.ch) != 1 {
 		t.Error("other peer should receive the event")
+	}
+}
+
+func TestShareHostRewritesLoopback(t *testing.T) {
+	got := ShareHost("127.0.0.1:8080")
+	if strings.HasPrefix(got, "127.") {
+		if lanIP() == "" {
+			t.Skip("no LAN interface in this environment")
+		}
+		t.Fatalf("ShareHost(127.0.0.1:8080) = %q, still loopback", got)
+	}
+	if !strings.Contains(got, ":8080") {
+		t.Fatalf("ShareHost should keep the port, got %q", got)
 	}
 }
 

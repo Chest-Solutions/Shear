@@ -409,14 +409,22 @@ func lanIP() string {
 	if err != nil {
 		return ""
 	}
+	var fallback string
 	for _, a := range addrs {
 		ipnet, ok := a.(*net.IPNet)
 		if !ok || ipnet.IP.IsLoopback() {
 			continue
 		}
-		if ip4 := ipnet.IP.To4(); ip4 != nil {
+		ip4 := ipnet.IP.To4()
+		if ip4 == nil || ip4.IsLinkLocalUnicast() {
+			continue
+		}
+		if ip4.IsPrivate() {
 			return ip4.String()
 		}
+		if fallback == "" {
+			fallback = ip4.String()
+		}
 	}
-	return ""
+	return fallback
 }
