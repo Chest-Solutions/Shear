@@ -208,6 +208,18 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess.mu.Lock()
+	if old, reconnected := sess.peers[peer.ID]; reconnected {
+		// Same peer id came back (EventSource reconnect, flaky network,
+		// laptop lid). Keep its name/colour and swap in the new channel;
+		// the stale goroutine owns the old channel and dies with its
+		// request context.
+		if peer.Name == "" || strings.HasPrefix(peer.Name, "Designer") {
+			peer.Name = old.Name
+		}
+		if peer.Color == "" {
+			peer.Color = old.Color
+		}
+	}
 	if peer.Color == "" {
 		peer.Color = peerColor(len(sess.peers))
 	}

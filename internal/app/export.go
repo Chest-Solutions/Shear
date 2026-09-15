@@ -111,6 +111,10 @@ func svgNode(body, defs *strings.Builder, n Node, ctr *int) {
 		if n.Text != nil {
 			svgText(body, n)
 		}
+	case NodeIcon:
+		if n.Icon != nil && strings.Contains(n.Icon.SVG, "<svg") {
+			svgIcon(body, n)
+		}
 	}
 
 	for _, c := range n.Children {
@@ -120,6 +124,20 @@ func svgNode(body, defs *strings.Builder, n Node, ctr *int) {
 		svgNode(body, defs, child, ctr)
 	}
 	body.WriteString("</g>\n")
+}
+
+// svgIcon embeds a library icon as a nested <svg>. The stored markup uses
+// currentColor, so tinting is a plain string replacement.
+func svgIcon(body *strings.Builder, n Node) {
+	col := n.Icon.Color
+	if col == "" {
+		col = "#ffffff"
+	}
+	markup := strings.ReplaceAll(n.Icon.SVG, "currentColor", attr(col))
+	markup = strings.Replace(markup, "<svg", fmt.Sprintf(
+		`<svg x="%s" y="%s" width="%s" height="%s" preserveAspectRatio="none"`,
+		num(n.X), num(n.Y), num(n.Width), num(n.Height)), 1)
+	body.WriteString(markup + "\n")
 }
 
 func svgText(body *strings.Builder, n Node) {
@@ -260,6 +278,15 @@ func htmlNode(body, css *strings.Builder, n Node, ctr *int, indent int) {
 			w, col = n.Stroke.Width, n.Stroke.Color
 		}
 		style = append(style, "border:none", fmt.Sprintf("border-top:%spx solid %s", num(w), col))
+	}
+	if n.Type == NodeIcon && n.Icon != nil && strings.Contains(n.Icon.SVG, "<svg") {
+		col := n.Icon.Color
+		if col == "" {
+			col = "#ffffff"
+		}
+		svg := strings.ReplaceAll(n.Icon.SVG, "currentColor", col)
+		svg = strings.Replace(svg, "<svg", `<svg style="width:100%;height:100%;display:block" preserveAspectRatio="none"`, 1)
+		content = svg
 	}
 
 	writeAnimationCSS(css, cls, n)

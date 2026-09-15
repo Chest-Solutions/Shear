@@ -18,7 +18,16 @@ const (
 	NodeEllipse NodeType = "ellipse"
 	NodeLine    NodeType = "line"
 	NodeText    NodeType = "text"
+	NodeIcon    NodeType = "icon"
 )
+
+// IconData is an icon from the built-in library (Lucide / Heroicons).
+// SVG is the standalone `<svg>` markup using currentColor; the renderer
+// tints it by replacing currentColor with Color.
+type IconData struct {
+	SVG   string `json:"svg"`
+	Color string `json:"color"`
+}
 
 // TextAlign controls horizontal text alignment inside a text node.
 type TextAlign string
@@ -148,6 +157,10 @@ type Node struct {
 	Visible     bool    `json:"visible"`
 	Locked      bool    `json:"locked"`
 	Fill         *string      `json:"fill"`
+	// FillVar/StrokeVar/TextVar name the color variable each color tracks.
+	FillVar      string       `json:"fillVar,omitempty"`
+	StrokeVar    string       `json:"strokeVar,omitempty"`
+	TextVar      string       `json:"textVar,omitempty"`
 	Stroke       *Stroke      `json:"stroke,omitempty"`
 	CornerRadius float64      `json:"cornerRadius,omitempty"`
 	CornerRadii  *CornerRadii `json:"cornerRadii,omitempty"`
@@ -158,6 +171,8 @@ type Node struct {
 	Flip bool `json:"flip,omitempty"`
 	// Text is text-only.
 	Text *TextData `json:"text,omitempty"`
+	// Icon is icon-only: library glyph markup plus its tint.
+	Icon *IconData `json:"icon,omitempty"`
 	// Children are frame-only.
 	Children []Node `json:"children,omitempty"`
 }
@@ -195,18 +210,31 @@ type Scene struct {
 	Width      float64 `json:"width"`
 	Height     float64 `json:"height"`
 	Background string  `json:"background"`
-	Nodes      []Node  `json:"nodes"`
+	// BackgroundVar optionally names the color variable driving Background.
+	BackgroundVar string `json:"backgroundVar,omitempty"`
+	Nodes          []Node `json:"nodes"`
+}
+
+// ColorVariable is a named, reusable color stored on the document
+// (Figma/Lunacy-style color variables). Nodes reference one through
+// their fillVar/strokeVar/textVar fields and keep their concrete color
+// in sync with it.
+type ColorVariable struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
 }
 
 // Document is the whole design file.
 type Document struct {
-	Version         int     `json:"version"`
-	App             string  `json:"app"`
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	UpdatedAt       string  `json:"updatedAt"`
-	SelectedSceneID string  `json:"selectedSceneId"`
-	Scenes          []Scene `json:"scenes"`
+	Version         int             `json:"version"`
+	App             string          `json:"app"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	UpdatedAt       string          `json:"updatedAt"`
+	SelectedSceneID string          `json:"selectedSceneId"`
+	Scenes          []Scene         `json:"scenes"`
+	Variables       []ColorVariable `json:"variables,omitempty"`
 }
 
 // Now returns the canonical timestamp used by the document.
@@ -268,7 +296,7 @@ func validateNodes(nodes []Node, depth int) error {
 	for i := range nodes {
 		n := &nodes[i]
 		switch n.Type {
-		case NodeFrame, NodeRect, NodeEllipse, NodeLine, NodeText:
+		case NodeFrame, NodeRect, NodeEllipse, NodeLine, NodeText, NodeIcon:
 		default:
 			return errors.New("unknown node type: " + string(n.Type))
 		}
