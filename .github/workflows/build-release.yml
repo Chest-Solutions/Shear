@@ -111,6 +111,10 @@ jobs:
           tag="$(cat release-stage/RELEASE_TAG 2>/dev/null || echo v2.0.0)"
           title="$(cat release-stage/RELEASE_TITLE 2>/dev/null || echo "Shear 2.0")"
           sha="$(git rev-parse --short HEAD)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release-stage/*.zip --clobber
+            exit 0
+          fi
           gh release create "$tag" --target "$GITHUB_SHA" \
             --title "$title" \
             --notes "Binaries built in the Arena session with a from-scratch Go 1.23.0 toolchain and verified there by the full two-peer collaboration e2e; published through CI.
