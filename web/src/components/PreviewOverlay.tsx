@@ -71,7 +71,7 @@ export function PreviewOverlay({ scene, open, onClose }: { scene: Scene; open: b
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-neutral-900/80 backdrop-blur-xl"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-ink-950/80 backdrop-blur-xl"
         >
           <div
             className="relative overflow-hidden rounded-xl shadow-panel"
@@ -88,7 +88,7 @@ export function PreviewOverlay({ scene, open, onClose }: { scene: Scene; open: b
             ))}
           </div>
 
-          <div className="flex items-center gap-1 rounded-full border border-white/10 bg-neutral-800/70 p-1 backdrop-blur-xl">
+          <div className="flex items-center gap-1 rounded-full border border-white/10 bg-ink-800/80 p-1 backdrop-blur-xl">
             <button
               onClick={() => setPlaying((p) => !p)}
               className="flex h-7 w-7 items-center justify-center rounded-full text-neutral-300 transition-colors hover:bg-white/10 hover:text-neutral-100"
@@ -144,11 +144,18 @@ function PreviewNode({ node }: { node: Node }) {
   return (
     <div style={nodeStyle(node)}>
       {node.type === 'text' ? node.text?.content : null}
+      {node.type === 'icon' && node.icon ? <IconGlyph node={node} /> : null}
       {node.children?.map((c) => (
         <PreviewNode key={c.id} node={c} />
       ))}
     </div>
   )
+}
+
+function IconGlyph({ node }: { node: Node }) {
+  const svg = (node.icon?.svg ?? '').split('currentColor').join(node.icon?.color || '#ffffff')
+  const ready = svg.replace('<svg', '<svg style="width:100%;height:100%;display:block" preserveAspectRatio="none"')
+  return <span style={{ display: 'block', width: '100%', height: '100%' }} dangerouslySetInnerHTML={{ __html: ready }} />
 }
 
 /** Node → CSS. Shared shape with the Go HTML exporter. */

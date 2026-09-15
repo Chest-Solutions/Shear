@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, MonitorSmartphone } from 'lucide-react'
+import { Logo } from './Logo'
 
-const EASE = [0.25, 0.1, 0.25, 1] as const
+const EASE = [0.16, 1, 0.3, 1] as const
 
 /**
- * Shown when a share link is opened. Shear is a desktop app, so we offer
- * to hand off to it first (shear://) and fall back to this browser.
+ * Shown when a share link is opened. Joining in the browser is the
+ * primary path — the desktop handoff stays available underneath.
  */
-export function JoinGate({ sessionId, onContinue }: { sessionId: string; onContinue: () => void }) {
-  const [name, setName] = useState('')
+export function JoinGate({ sessionId, onContinue }: { sessionId: string; onContinue: (name: string) => void }) {
+  const [name, setName] = useState(() => sessionStorage.getItem('shear.name') ?? '')
   const [info, setInfo] = useState<{ name: string; peers: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tried, setTried] = useState(false)
@@ -23,43 +24,46 @@ export function JoinGate({ sessionId, onContinue }: { sessionId: string; onConti
 
   const remember = () => sessionStorage.setItem('shear.name', name.trim() || 'Designer')
 
+  const enter = () => {
+    remember()
+    onContinue(name.trim() || 'Designer')
+  }
+
   const openApp = () => {
     remember()
     setTried(true)
     // The scheme carries the host, so the desktop app knows which machine
     // is hosting the room and connects there rather than to its own
     // in-process backend. If Shear isn't installed nothing happens and
-    // the browser option below stays available.
+    // the browser option above stays available.
     window.location.href = `shear://${window.location.host}/join/${sessionId}`
   }
 
-  const enter = () => {
-    remember()
-    onContinue()
-  }
-
   return (
-    <div className="flex h-full items-center justify-center bg-neutral-800 px-6">
+    <div className="flex h-full items-center justify-center bg-ink-800 px-6">
       <motion.div
         initial={{ opacity: 0, y: 8, filter: 'blur(12px)' }}
         animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
         transition={{ duration: 0.4, ease: EASE }}
-        className="w-80 rounded-2xl border border-white/10 bg-neutral-900/70 p-5 shadow-panel backdrop-blur-2xl"
+        className="w-80 rounded-2xl border border-white/10 bg-ink-900/80 p-5 shadow-panel backdrop-blur-2xl"
       >
-        <div className="text-[13px] font-semibold tracking-tight text-neutral-100">Shear</div>
+        <div className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-neutral-100">
+          <Logo size={15} />
+          Shear
+        </div>
 
         {error ? (
-          <p className="mt-2 text-[12px] text-neutral-400">{error}</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-neutral-400">{error}</p>
         ) : (
           <>
             <p className="mt-1 text-[12px] text-neutral-400">
-              {info ? `Join “${info.name}”` : 'Joining…'}
+              {info ? `Join “${info.name}”${info.peers > 0 ? ` — ${info.peers} inside` : ''}` : 'Joining…'}
             </p>
 
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && name.trim() && openApp()}
+              onKeyDown={(e) => e.key === 'Enter' && name.trim() && enter()}
               autoFocus
               placeholder="Your name"
               spellCheck={false}
@@ -67,27 +71,28 @@ export function JoinGate({ sessionId, onContinue }: { sessionId: string; onConti
             />
 
             <button
+              onClick={enter}
+              disabled={!name.trim()}
+              className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg bg-white py-2 text-[12px] font-medium text-neutral-900 transition-colors hover:bg-neutral-200 disabled:opacity-40"
+            >
+              Join in browser
+              <ArrowRight size={12} strokeWidth={2.2} />
+            </button>
+
+            <button
               onClick={openApp}
               disabled={!name.trim()}
-              className="mt-2.5 w-full rounded-lg bg-white py-2 text-[12px] font-medium text-neutral-900 transition-colors hover:bg-neutral-200 disabled:opacity-40"
+              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-[11px] text-neutral-500 transition-colors hover:text-neutral-300 disabled:opacity-40"
             >
-              Open in Shear
+              <MonitorSmartphone size={11} strokeWidth={2} />
+              Open in the desktop app
             </button>
 
             {tried && (
               <p className="mt-1.5 text-center text-[10px] leading-relaxed text-neutral-600">
-                Nothing happened? Shear may not be installed on this machine.
+                Nothing happened? Shear may not be installed on this machine — join in the browser instead.
               </p>
             )}
-
-            <button
-              onClick={enter}
-              disabled={!name.trim()}
-              className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg py-1.5 text-[11px] text-neutral-500 transition-colors hover:text-neutral-300 disabled:opacity-40"
-            >
-              Continue here
-              <ArrowRight size={11} strokeWidth={2} />
-            </button>
           </>
         )}
       </motion.div>

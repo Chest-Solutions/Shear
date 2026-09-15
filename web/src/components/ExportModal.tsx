@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Loader2 } from 'lucide-react'
+import { CodeXml, Component, FileCode2, FileImage, FileJson, Loader2 } from 'lucide-react'
 import type { Scene } from '../types'
 
 const EASE = [0.16, 1, 0.3, 1] as const
 
-export type SceneFormat = 'png' | 'svg' | 'html'
+export type SceneFormat = 'png' | 'svg' | 'html' | 'react' | 'shear'
 
-const FORMATS: { id: SceneFormat; label: string; hint: string }[] = [
-  { id: 'png', label: 'PNG', hint: 'Flat image, 2×' },
-  { id: 'svg', label: 'SVG', hint: 'Vector, editable' },
-  { id: 'html', label: 'HTML', hint: 'Live, with animations' },
+const FORMATS: { id: SceneFormat; label: string; hint: string; icon: React.ReactNode }[] = [
+  { id: 'png', label: 'PNG', hint: 'Flat image, 2×', icon: <FileImage size={13} strokeWidth={1.8} /> },
+  { id: 'svg', label: 'SVG', hint: 'Vector, editable', icon: <CodeXml size={13} strokeWidth={1.8} /> },
+  { id: 'html', label: 'HTML', hint: 'Live, with animations', icon: <FileCode2 size={13} strokeWidth={1.8} /> },
+  { id: 'react', label: 'React', hint: 'A .tsx component', icon: <Component size={13} strokeWidth={1.8} /> },
+  { id: 'shear', label: '.shear', hint: 'Whole document, shareable', icon: <FileJson size={13} strokeWidth={1.8} /> },
 ]
 
 interface Props {
@@ -54,7 +56,7 @@ export function ExportModal({ open, scenes, defaultSceneId, onClose, onExport }:
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.25, ease: EASE }}
-          className="fixed inset-0 z-40 flex items-center justify-center bg-neutral-950/40 backdrop-blur-sm"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-ink-950/50 backdrop-blur-sm"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) onClose()
           }}
@@ -64,25 +66,32 @@ export function ExportModal({ open, scenes, defaultSceneId, onClose, onExport }:
             animate={{ opacity: 1, filter: 'blur(0px)', scale: 1, y: 0 }}
             exit={{ opacity: 0, filter: 'blur(12px)', scale: 0.97, y: 6 }}
             transition={{ duration: 0.32, ease: EASE }}
-            className="w-80 overflow-hidden rounded-xl border border-white/10 bg-neutral-900/95 shadow-panel backdrop-blur-2xl"
+            className="w-80 overflow-hidden rounded-xl border border-white/10 bg-ink-900/95 shadow-panel backdrop-blur-2xl"
           >
             <div className="px-4 pt-4">
               <h2 className="text-[13px] font-medium text-neutral-100">Export scene</h2>
-              <p className="mt-0.5 text-[11px] text-neutral-500">Rendered by the Go backend.</p>
+              <p className="mt-0.5 text-[11px] text-neutral-500">
+                {format === 'react'
+                  ? 'Generated as a dependency-free React component.'
+                  : format === 'shear'
+                    ? 'The whole document — hand it to another designer.'
+                    : 'Rendered by the Go backend.'}
+              </p>
 
-              <div className="mt-3 flex gap-0.5 rounded-lg border border-white/10 bg-white/5 p-0.5">
+              <div className="mt-3 grid grid-cols-5 gap-0.5 rounded-lg border border-white/10 bg-white/5 p-0.5">
                 {FORMATS.map((f) => (
                   <button
                     key={f.id}
                     title={f.hint}
                     onClick={() => setFormat(f.id)}
-                    className={`relative flex-1 rounded-md py-1 text-[11px] transition-colors ${
+                    className={`relative flex flex-col items-center gap-0.5 rounded-md py-1.5 text-[10.5px] transition-colors ${
                       format === f.id ? 'text-neutral-900' : 'text-neutral-400 hover:text-neutral-100'
                     }`}
                   >
                     {format === f.id && (
                       <motion.span layoutId="fmt-active" transition={{ duration: 0.25, ease: EASE }} className="absolute inset-0 rounded-md bg-white" />
                     )}
+                    <span className="relative">{f.icon}</span>
                     <span className="relative">{f.label}</span>
                   </button>
                 ))}
@@ -133,7 +142,7 @@ export function ExportModal({ open, scenes, defaultSceneId, onClose, onExport }:
                 className="flex items-center gap-1.5 rounded-md bg-white px-3.5 py-1.5 text-[12px] font-medium text-neutral-900 transition-colors hover:bg-neutral-200 disabled:opacity-60"
               >
                 {busy && <Loader2 size={12} className="animate-spin" />}
-                {busy ? 'Rendering' : `Export ${format.toUpperCase()}`}
+                {busy ? 'Rendering' : `Export ${format === 'react' ? 'React' : format.toUpperCase()}`}
               </button>
             </div>
           </motion.div>

@@ -19,11 +19,77 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Vet
-        run: go vet ./...
+      - name: Vet & test
+        run: |
+          set -o pipefail
+          { echo "=== go vet ==="; go vet ./... 2>&1; echo; echo "=== go test ==="; go test ./... 2>&1; } | tee /tmp/gotest.log
 
-      - name: Test
-        run: go test ./...
+      # Pushes made with GITHUB_TOKEN never trigger new runs, so this
+      # cannot loop — it just makes the log inspectable from git.
+      - name: Publish test report
+        if: always()
+        run: |
+          mkdir -p ci-reports
+          cp /tmp/gotest.log "ci-reports/unit-$(git rev-parse --short HEAD).log"
+          git config user.name "shear-ci"
+          git config user.email "ci@shear.local"
+          git add ci-reports
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: unit test report $(git rev-parse --short HEAD)"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+  e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build server
+        run: CGO_ENABLED=0 go build -o /tmp/shear .
+
+      - name: Run server + two-peer collaboration scenario
+        run: |
+          set -o pipefail
+          SHEAR_ADDR=127.0.0.1:8090 SHEAR_DATA=/tmp/shear-data SHEAR_DIST="$PWD/web/dist" /tmp/shear &
+          srv=$!
+          for i in $(seq 1 50); do
+            curl -sf http://127.0.0.1:8090/api/health >/dev/null && break
+            sleep 0.2
+          done
+          SHEAR_BASE=http://127.0.0.1:8090 node scripts/e2e-collab.mjs | tee /tmp/e2e.log
+          status=$?
+          kill $srv 2>/dev/null || true
+          exit $status
+
+      - name: Publish e2e report
+        if: always()
+        run: |
+          mkdir -p ci-reports
+          cp /tmp/e2e.log "ci-reports/e2e-$(git rev-parse --short HEAD).log" || true
+          git config user.name "shear-ci"
+          git config user.email "ci@shear.local"
+          git add ci-reports
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: e2e report $(git rev-parse --short HEAD)"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
 
   build:
     needs: test

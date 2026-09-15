@@ -46,7 +46,7 @@ export function ShareSheet({ open, onClose, url, starting, peers, self, name, on
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
           onMouseDown={onClose}
-          className="fixed inset-0 z-40 flex items-start justify-center bg-neutral-950/40 pt-24 backdrop-blur-md"
+          className="fixed inset-0 z-40 flex items-start justify-center bg-ink-950/50 pt-24 backdrop-blur-md"
         >
           <motion.div
             initial={{ opacity: 0, y: -8, scale: 0.98, filter: 'blur(10px)' }}
@@ -54,7 +54,7 @@ export function ShareSheet({ open, onClose, url, starting, peers, self, name, on
             exit={{ opacity: 0, y: -8, scale: 0.98, filter: 'blur(10px)' }}
             transition={{ duration: 0.26, ease: EASE }}
             onMouseDown={(e) => e.stopPropagation()}
-            className="w-80 rounded-2xl border border-white/10 bg-neutral-900/80 p-4 shadow-panel backdrop-blur-2xl"
+            className="w-80 rounded-2xl border border-white/10 bg-ink-900/90 p-4 shadow-panel backdrop-blur-2xl"
           >
             <div className="flex items-center gap-2">
               <Users size={14} strokeWidth={1.8} className="text-neutral-400" />

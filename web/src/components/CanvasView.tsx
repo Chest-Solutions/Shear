@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Maximize2, Minus, Plus } from 'lucide-react'
 import type { Node, Peer, Scene, Tool } from '../types'
-import { drawScene, screenToWorld, worldToScreen, type Viewport } from '../render'
+import { drawScene, onIconReady, screenToWorld, worldToScreen, type Viewport } from '../render'
 import { clamp, defaultCornerRadii, makeNode, nextName, round1 } from '../utils'
 import { PresenceLayer } from './Presence'
+import {
+  CURSOR_CROSSHAIR,
+  CURSOR_GRABBING,
+  CURSOR_HAND,
+  CURSOR_MOVE,
+  CURSOR_ROTATE,
+  CURSOR_TEXT,
+  resizeCursor,
+} from '../cursors'
 
 // ---- affine matrix helpers (row-major 2x3) ----
 interface Mat {
@@ -47,8 +56,6 @@ function nodeMat(n: Node): Mat {
   const sin = Math.sin((n.rotation * Math.PI) / 180)
   const cx = n.width / 2
   const cy = n.height / 2
-  // T(x+cx,y+cy) · R · T(-cx,-cy). The old code forgot T(x,y), causing
-  // selection boxes/hit handles to stay stuck at 0,0 after moving an object.
   return {
     a: cos,
     b: sin,
@@ -93,15 +100,15 @@ function hitTest(nodes: Node[], p: { x: number; y: number }): Node | null {
 
 type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 type CornerId = 'tl' | 'tr' | 'br' | 'bl'
-const HANDLES: { id: HandleId; fx: number; fy: number; cursor: string }[] = [
-  { id: 'nw', fx: 0, fy: 0, cursor: 'nwse-resize' },
-  { id: 'n', fx: 0.5, fy: 0, cursor: 'ns-resize' },
-  { id: 'ne', fx: 1, fy: 0, cursor: 'nesw-resize' },
-  { id: 'e', fx: 1, fy: 0.5, cursor: 'ew-resize' },
-  { id: 'se', fx: 1, fy: 1, cursor: 'nwse-resize' },
-  { id: 's', fx: 0.5, fy: 1, cursor: 'ns-resize' },
-  { id: 'sw', fx: 0, fy: 1, cursor: 'nesw-resize' },
-  { id: 'w', fx: 0, fy: 0.5, cursor: 'ew-resize' },
+const HANDLES: { id: HandleId; fx: number; fy: number }[] = [
+  { id: 'nw', fx: 0, fy: 0 },
+  { id: 'n', fx: 0.5, fy: 0 },
+  { id: 'ne', fx: 1, fy: 0 },
+  { id: 'e', fx: 1, fy: 0.5 },
+  { id: 'se', fx: 1, fy: 1 },
+  { id: 's', fx: 0.5, fy: 1 },
+  { id: 'sw', fx: 0, fy: 1 },
+  { id: 'w', fx: 0, fy: 0.5 },
 ]
 
 function handleWorld(n: Node, world: Mat, h: { fx: number; fy: number }): { x: number; y: number } {
@@ -111,11 +118,11 @@ function handleWorld(n: Node, world: Mat, h: { fx: number; fy: number }): { x: n
 interface Props {
   scene: Scene
   tool: Tool
-  selectionId: string | null
+  selectionIds: string[]
   editingId: string | null
   viewport: Viewport
   onViewport: (vp: Viewport) => void
-  select: (id: string | null) => void
+  select: (ids: string[]) => void
   /** Mutate the scene's nodes. record=false for live drag frames. */
   mutate: (fn: (nodes: Node[]) => void, record: boolean) => void
   gestureBegin: () => void
@@ -133,18 +140,39 @@ interface Props {
   onPointer?: (p: { x: number; y: number }) => void
 }
 
+interface DragState {
+  kind: 'move' | 'resize' | 'draw' | 'pan' | 'rotate' | 'corner' | 'marquee'
+  startWorld: { x: number; y: number }
+  startClient: { x: number; y: number }
+  startPan?: { x: number; y: number }
+  handle?: HandleId
+  corner?: CornerId
+  startRotation?: number
+  startRadii?: { tl: number; tr: number; br: number; bl: number; linked: boolean }
+  drawTool?: 'rect' | 'ellipse' | 'line' | 'frame'
+  nodeStart?: { x: number; y: number; w: number; h: number; flip: boolean; rotation?: number }
+  /** move drags carry the starting box of every selected node */
+  groupStart?: Map<string, { x: number; y: number }>
+  shift?: boolean
+}
+
 export function CanvasView(props: Props) {
-  const { scene, tool, selectionId, editingId, viewport, onViewport } = props
+  const { scene, tool, selectionIds, editingId, viewport, onViewport } = props
+  const selectionId = selectionIds.length > 0 ? selectionIds[selectionIds.length - 1] : null
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [preview, setPreview] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const [guides, setGuides] = useState<{ x?: number[]; y?: number[] }>({})
   const [menu, setMenu] = useState<{ sx: number; sy: number; wx: number; wy: number; nodeId: string | null } | null>(null)
   const [spaceDown, setSpaceDown] = useState(false)
+  // repaints once a lazily-decoded icon glyph arrives
+  const [, forceRepaint] = useState(0)
   const dragRef = useRef<DragState | null>(null)
   const gestureDirty = useRef(false)
   const editingTextRef = useRef<string | null>(null)
   editingTextRef.current = editingId
+
+  useEffect(() => onIconReady(() => forceRepaint((v) => v + 1)), [])
 
   // ---- viewport helpers ----
   const fitView = useCallback(() => {
@@ -184,10 +212,11 @@ export function CanvasView(props: Props) {
     drawScene(ctx, visibleScene)
 
     // selection overlay
-    if (selectionId) {
+    if (selectionIds.length > 0) {
       const worlds = nodeWorlds(scene.nodes)
-      const hit = worlds.find((x) => x.node.id === selectionId)
-      if (hit) {
+      const selected = worlds.filter((x) => selectionIds.includes(x.node.id))
+      const primary = selected[selected.length - 1]
+      for (const hit of selected) {
         const { node, world } = hit
         const pts = [
           applyMat(world, 0, 0),
@@ -196,18 +225,24 @@ export function CanvasView(props: Props) {
           applyMat(world, 0, node.height),
         ]
         ctx.save()
-        ctx.strokeStyle = 'rgba(82, 154, 255, 0.98)'
+        ctx.strokeStyle = 'rgba(45, 125, 255, 0.95)'
         ctx.lineWidth = 1.25 / viewport.zoom
         ctx.beginPath()
         ctx.moveTo(pts[0].x, pts[0].y)
         for (const pt of pts.slice(1)) ctx.lineTo(pt.x, pt.y)
         ctx.closePath()
         ctx.stroke()
+        ctx.restore()
+      }
+      // handles + corner-radius dots only when exactly one node is selected
+      if (selectionIds.length === 1 && primary) {
+        const { node, world } = primary
+        ctx.save()
         const hs = 7 / viewport.zoom
         for (const hd of HANDLES) {
           const hp = handleWorld(node, world, hd)
           ctx.fillStyle = '#ffffff'
-          ctx.strokeStyle = 'rgba(23,23,23,0.9)'
+          ctx.strokeStyle = 'rgba(18,18,18,0.9)'
           ctx.lineWidth = 1 / viewport.zoom
           ctx.beginPath()
           ctx.rect(hp.x - hs / 2, hp.y - hs / 2, hs, hs)
@@ -227,7 +262,7 @@ export function CanvasView(props: Props) {
             ctx.beginPath()
             ctx.arc(p.x, p.y, 5 / viewport.zoom, 0, Math.PI * 2)
             ctx.fillStyle = '#2d7dff'
-            ctx.strokeStyle = '#111827'
+            ctx.strokeStyle = '#0e0e0e'
             ctx.lineWidth = 1.5 / viewport.zoom
             ctx.fill(); ctx.stroke()
           }
@@ -239,7 +274,7 @@ export function CanvasView(props: Props) {
     // smart guides
     if (guides.x?.length || guides.y?.length) {
       ctx.save()
-      ctx.strokeStyle = 'rgba(255, 49, 132, 0.95)'
+      ctx.strokeStyle = 'rgba(45, 125, 255, 0.9)'
       ctx.lineWidth = 1 / viewport.zoom
       ctx.setLineDash([6 / viewport.zoom, 3 / viewport.zoom])
       for (const x of guides.x ?? []) { ctx.beginPath(); ctx.moveTo(x, -100000); ctx.lineTo(x, 100000); ctx.stroke() }
@@ -247,27 +282,35 @@ export function CanvasView(props: Props) {
       ctx.restore()
     }
 
-    // draw preview (only while actively drawing)
+    // draw preview (while drawing shapes) or the marquee rectangle
     if (preview) {
       ctx.save()
-      ctx.strokeStyle = 'rgba(255,255,255,0.75)'
-      ctx.lineWidth = 1.25 / viewport.zoom
-      ctx.setLineDash([4 / viewport.zoom, 3 / viewport.zoom])
       const x = Math.min(preview.x0, preview.x1)
       const y = Math.min(preview.y0, preview.y1)
       const wdt = Math.abs(preview.x1 - preview.x0)
       const hgt = Math.abs(preview.y1 - preview.y0)
-      if (tool === 'line') {
-        ctx.beginPath()
-        ctx.moveTo(preview.x0, preview.y0)
-        ctx.lineTo(preview.x1, preview.y1)
-        ctx.stroke()
-      } else {
+      if (dragRef.current?.kind === 'marquee') {
+        ctx.fillStyle = 'rgba(45, 125, 255, 0.08)'
+        ctx.strokeStyle = 'rgba(45, 125, 255, 0.8)'
+        ctx.lineWidth = 1 / viewport.zoom
+        ctx.fillRect(x, y, wdt, hgt)
         ctx.strokeRect(x, y, wdt, hgt)
+      } else {
+        ctx.strokeStyle = 'rgba(255,255,255,0.75)'
+        ctx.lineWidth = 1.25 / viewport.zoom
+        ctx.setLineDash([4 / viewport.zoom, 3 / viewport.zoom])
+        if (tool === 'line') {
+          ctx.beginPath()
+          ctx.moveTo(preview.x0, preview.y0)
+          ctx.lineTo(preview.x1, preview.y1)
+          ctx.stroke()
+        } else {
+          ctx.strokeRect(x, y, wdt, hgt)
+        }
       }
       ctx.restore()
     }
-  }, [scene, selectionId, viewport, preview, tool, guides])
+  }, [scene, selectionIds, viewport, preview, tool, guides])
 
   // ---- wheel (zoom / pan), non-passive ----
   useEffect(() => {
@@ -318,7 +361,7 @@ export function CanvasView(props: Props) {
   }
 
   const handleHit = (wpt: { x: number; y: number }): HandleId | null => {
-    if (!selectionId) return null
+    if (selectionIds.length !== 1 || !selectionId) return null
     const worlds = nodeWorlds(scene.nodes)
     const hit = worlds.find((x) => x.node.id === selectionId)
     if (!hit) return null
@@ -333,6 +376,7 @@ export function CanvasView(props: Props) {
   const selectedWorld = () => selectionId ? nodeWorlds(scene.nodes).find((x) => x.node.id === selectionId) ?? null : null
 
   const rotateHit = (wpt: { x: number; y: number }): boolean => {
+    if (selectionIds.length !== 1) return false
     const hit = selectedWorld()
     if (!hit) return false
     const lp = applyMat(invert(hit.world), wpt.x, wpt.y)
@@ -344,6 +388,7 @@ export function CanvasView(props: Props) {
   }
 
   const cornerHit = (wpt: { x: number; y: number }): CornerId | null => {
+    if (selectionIds.length !== 1) return null
     const hit = selectedWorld()
     if (!hit || (hit.node.type !== 'rect' && hit.node.type !== 'frame')) return null
     const rs = cornerRadii(hit.node)
@@ -361,27 +406,17 @@ export function CanvasView(props: Props) {
     return null
   }
 
-  interface DragState {
-    kind: 'move' | 'resize' | 'draw' | 'pan' | 'rotate' | 'corner'
-    startWorld: { x: number; y: number }
-    startClient: { x: number; y: number }
-    startPan?: { x: number; y: number }
-    handle?: HandleId
-    corner?: CornerId
-    startRotation?: number
-    startRadii?: { tl: number; tr: number; br: number; bl: number; linked: boolean }
-    drawTool?: 'rect' | 'ellipse' | 'line'
-    nodeStart?: { x: number; y: number; w: number; h: number; flip: boolean; rotation?: number }
-  }
+  const CORNER_TO_HANDLE: Record<CornerId, HandleId> = { tl: 'nw', tr: 'ne', br: 'se', bl: 'sw' }
 
   const onMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 1 || (e.button === 0 && spaceDown)) {
+    if (e.button === 1 || (e.button === 0 && (spaceDown || tool === 'hand'))) {
       dragRef.current = {
         kind: 'pan',
         startWorld: { x: 0, y: 0 },
         startClient: { x: e.clientX, y: e.clientY },
         startPan: { x: viewport.panX, y: viewport.panY },
       }
+      if (canvasRef.current) canvasRef.current.style.cursor = CURSOR_GRABBING
       e.preventDefault()
       return
     }
@@ -443,19 +478,42 @@ export function CanvasView(props: Props) {
         }
       }
       if (target) {
-        if (target.id !== selectionId) props.select(target.id)
+        // Shift toggles membership; otherwise clicking outside the current
+        // selection replaces it, inside keeps the whole group.
+        if (e.shiftKey) {
+          const next = selectionIds.includes(target.id)
+            ? selectionIds.filter((id) => id !== target.id)
+            : [...selectionIds, target.id]
+          props.select(next)
+          return
+        }
+        if (!selectionIds.includes(target.id)) props.select([target.id])
         if (!target.locked) {
           props.gestureBegin()
           gestureDirty.current = false
+          const groupStart = new Map<string, { x: number; y: number }>()
+          const ids = selectionIds.includes(target.id) ? selectionIds : [target.id]
+          for (const id of ids) {
+            const n = findAny(scene.nodes, id)
+            if (n && !n.locked) groupStart.set(id, { x: n.x, y: n.y })
+          }
           dragRef.current = {
             kind: 'move',
             startWorld: wpt,
             startClient: { x: e.clientX, y: e.clientY },
+            groupStart,
             nodeStart: { x: target.x, y: target.y, w: target.width, h: target.height, flip: !!target.flip },
           }
         }
       } else {
-        props.select(null)
+        // empty pasteboard: start a marquee; a plain click clears
+        dragRef.current = {
+          kind: 'marquee',
+          startWorld: wpt,
+          startClient: { x: e.clientX, y: e.clientY },
+          shift: e.shiftKey,
+        }
+        setPreview({ x0: wpt.x, y0: wpt.y, x1: wpt.x, y1: wpt.y })
       }
       return
     }
@@ -464,20 +522,20 @@ export function CanvasView(props: Props) {
       const n = makeNode('text', wpt.x, wpt.y, 200, 32)
       n.name = nextName(scene.nodes, 'text')
       props.addNode(n)
-      props.select(n.id)
+      props.select([n.id])
       props.onToolDone()
       props.startTextEdit(n.id)
       return
     }
 
-    // drawing tools
+    // drawing tools: rect / ellipse / line / frame
     props.gestureBegin()
     gestureDirty.current = false
     dragRef.current = {
       kind: 'draw',
       startWorld: wpt,
       startClient: { x: e.clientX, y: e.clientY },
-      drawTool: tool,
+      drawTool: tool as DragState['drawTool'],
     }
     setPreview({ x0: wpt.x, y0: wpt.y, x1: wpt.x, y1: wpt.y })
   }
@@ -496,22 +554,7 @@ export function CanvasView(props: Props) {
         if (canvas && !spaceDown) {
           const rect = canvas.getBoundingClientRect()
           const wpt = screenToWorld(viewport, e.clientX - rect.left, e.clientY - rect.top)
-          let cursor = tool === 'select' ? 'default' : 'crosshair'
-          if (tool === 'select') {
-            const c = cornerHit(wpt)
-            const h = handleHit(wpt)
-            if (c) {
-              cursor = 'cell'
-            } else if (h) {
-              const def = HANDLES.find((x) => x.id === h)
-              cursor = def?.cursor ?? 'default'
-            } else if (selectionId && rotateHit(wpt)) {
-              cursor = 'grab'
-            } else if (hitTest(scene.nodes, wpt)) {
-              cursor = 'move'
-            }
-          }
-          canvas.style.cursor = cursor
+          canvas.style.cursor = hoverCursor(wpt)
         }
         return
       }
@@ -527,33 +570,43 @@ export function CanvasView(props: Props) {
 
       const wpt = toWorld(e)
 
-      if (drag.kind === 'move' && drag.nodeStart) {
-        const id = selectionId
-        if (!id) return
+      if (drag.kind === 'marquee') {
+        setPreview({ x0: drag.startWorld.x, y0: drag.startWorld.y, x1: wpt.x, y1: wpt.y })
+        return
+      }
+
+      if (drag.kind === 'move' && drag.groupStart) {
         const dx = wpt.x - drag.startWorld.x
         const dy = wpt.y - drag.startWorld.y
-        // world delta → parent-local delta (inverse of the parent rotation)
-        const parent = findParent(scene.nodes, id)
-        const pMat = parent ? nodeMat(parent) : IDENTITY
-        const ldx = pMat.a * dx + pMat.b * dy
-        const ldy = pMat.c * dx + pMat.d * dy
-        const snapped = snapRectToGuides(
-          { x: drag.nodeStart!.x + ldx, y: drag.nodeStart!.y + ldy, w: drag.nodeStart!.w, h: drag.nodeStart!.h },
-          scene,
-          id,
-          viewport,
-        )
-        setGuides(snapped.guides)
+        // snap using the primary node's box
+        let snapped = { x: 0, y: 0, guides: {} as { x?: number[]; y?: number[] } }
+        let anchored = false
         props.mutate(
           (nodes) => {
-            const n = findAny(nodes, id)
-            if (n) {
-              n.x = snapped.x
-              n.y = snapped.y
+            for (const [id, start] of drag.groupStart!) {
+              const n = findAny(nodes, id)
+              if (!n) continue
+              const parent = findParent(nodes, id)
+              const pMat = parent ? nodeMat(parent) : IDENTITY
+              const ldx = pMat.a * dx + pMat.b * dy
+              const ldy = pMat.c * dx + pMat.d * dy
+              if (!anchored && drag.nodeStart) {
+                const s = snapRectToGuides(
+                  { x: start.x + ldx, y: start.y + ldy, w: drag.nodeStart.w, h: drag.nodeStart.h },
+                  scene,
+                  [...drag.groupStart!.keys()],
+                  viewport,
+                )
+                snapped = { x: s.x - start.x, y: s.y - start.y, guides: s.guides }
+                anchored = true
+              }
+              n.x = start.x + snapped.x
+              n.y = start.y + snapped.y
             }
           },
           false,
         )
+        setGuides(snapped.guides)
         gestureDirty.current = true
         return
       }
@@ -563,7 +616,6 @@ export function CanvasView(props: Props) {
         if (!id) return
         const n0 = drag.nodeStart
         const shift = e.shiftKey
-        // pointer in node-local space (unrotated box coordinates)
         const dx = wpt.x - drag.startWorld.x
         const dy = wpt.y - drag.startWorld.y
         const parent = findParent(scene.nodes, id)
@@ -583,8 +635,8 @@ export function CanvasView(props: Props) {
           h = n0.h - ldy
           y = n0.y + ldy
         }
-        // Photoshop/Figma-style square lock while scaling: Shift makes W and H equal,
-        // not locked to the old aspect ratio.
+        // Shift makes W and H equal while scaling a corner, the way
+        // Photoshop/Figma do it — not locked to the old aspect ratio.
         if (shift && hd.length === 2) {
           const size = Math.max(Math.abs(w), Math.abs(h))
           w = size
@@ -662,8 +714,9 @@ export function CanvasView(props: Props) {
       }
 
       if (drag.kind === 'draw') {
-        const snapped = constrainDrawPoint(drag.drawTool ?? 'rect', drag.startWorld, wpt, e.shiftKey)
-        const sg = snapPointToGuides(snapped, scene, null, viewport)
+        const drawTool = drag.drawTool === 'frame' ? 'rect' : drag.drawTool ?? 'rect'
+        const snapped = constrainDrawPoint(drawTool, drag.startWorld, wpt, e.shiftKey)
+        const sg = snapPointToGuides(snapped, scene, [], viewport)
         setGuides(sg.guides)
         setPreview({ x0: drag.startWorld.x, y0: drag.startWorld.y, x1: sg.x, y1: sg.y })
       }
@@ -674,6 +727,31 @@ export function CanvasView(props: Props) {
       if (!drag) return
       dragRef.current = null
 
+      if (drag.kind === 'marquee' && preview) {
+        const x0 = Math.min(preview.x0, preview.x1)
+        const y0 = Math.min(preview.y0, preview.y1)
+        const x1 = Math.max(preview.x0, preview.x1)
+        const y1 = Math.max(preview.y0, preview.y1)
+        if (x1 - x0 < 3 / viewport.zoom && y1 - y0 < 3 / viewport.zoom) {
+          // it was a plain click on empty space
+          props.select([])
+        } else {
+          const hitIds: string[] = []
+          const collect = (list: Node[]) => {
+            for (const n of list) {
+              if (!n.visible) continue
+              const overlaps = n.x < x1 && n.x + n.width > x0 && n.y < y1 && n.y + n.height > y0
+              if (overlaps) hitIds.push(n.id)
+              // frames: only pick the frame itself, matching Figma's
+              // "select what you touch at the top level" behaviour
+            }
+          }
+          collect(scene.nodes)
+          const base = drag.shift ? selectionIds : []
+          props.select([...new Set([...base, ...hitIds])])
+        }
+      }
+
       if (drag.kind === 'draw') {
         const canvas = canvasRef.current
         const drawTool = drag.drawTool ?? 'rect'
@@ -682,8 +760,8 @@ export function CanvasView(props: Props) {
           let wpt = screenToWorld(viewport, e.clientX - rect.left, e.clientY - rect.top)
           const x0 = drag.startWorld.x
           const y0 = drag.startWorld.y
-          wpt = constrainDrawPoint(drawTool, drag.startWorld, wpt, e.shiftKey)
-          const snappedEnd = snapPointToGuides(wpt, scene, null, viewport)
+          const constrained = constrainDrawPoint(drawTool === 'frame' ? 'rect' : drawTool, drag.startWorld, wpt, e.shiftKey)
+          const snappedEnd = snapPointToGuides(constrained, scene, [], viewport)
           let x1 = snappedEnd.x
           let y1 = snappedEnd.y
           if (Math.abs(x1 - x0) > 0.5 || Math.abs(y1 - y0) > 0.5 || drawTool === 'line') {
@@ -702,45 +780,48 @@ export function CanvasView(props: Props) {
               n.y = Math.min(y0, y1)
               n.width = Math.abs(x1 - x0)
               n.height = Math.abs(y1 - y0)
-              // Negative slope uses the alternate diagonal. This fixes all four draw directions.
               n.flip = (x1 - x0) * (y1 - y0) < 0
             } else {
-              n = makeNode(drawTool, 0, 0, 1, 1)
+              n = makeNode(drawTool === 'frame' ? 'frame' : drawTool, 0, 0, 1, 1)
               n.x = Math.min(x0, x1)
               n.y = Math.min(y0, y1)
               n.width = Math.max(1, Math.abs(x1 - x0))
               n.height = Math.max(1, Math.abs(y1 - y0))
+              if (drawTool === 'frame') n.name = nextName(scene.nodes, 'frame')
             }
-            n.name = nextName(scene.nodes, n.type)
+            n.name = n.name || nextName(scene.nodes, n.type)
             n.x = round1(n.x)
             n.y = round1(n.y)
             n.width = round1(n.width)
             n.height = round1(n.height)
             props.addNode(n)
-            props.select(n.id)
+            props.select([n.id])
           }
           props.onToolDone()
         }
       } else if (drag.kind === 'move' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'corner') {
         // snap to 0.1
-        if (selectionId) {
-          props.mutate(
-            (nodes) => {
-              const n = findAny(nodes, selectionId)
+        props.mutate(
+          (nodes) => {
+            const ids = drag.kind === 'move' && drag.groupStart ? [...drag.groupStart.keys()] : selectionId ? [selectionId] : []
+            for (const id of ids) {
+              const n = findAny(nodes, id)
               if (n) {
                 n.x = round1(n.x)
                 n.y = round1(n.y)
                 n.width = round1(n.width)
                 n.height = round1(n.height)
               }
-            },
-            false,
-          )
-        }
+            }
+          },
+          false,
+        )
       }
       if (gestureDirty.current) props.gestureEnd()
+      gestureDirty.current = false
       setPreview(null)
       setGuides({})
+      if (canvasRef.current && !spaceDown && tool !== 'hand') canvasRef.current.style.cursor = hoverCursor(toWorld(e))
     }
 
     window.addEventListener('mousemove', onMove)
@@ -750,13 +831,34 @@ export function CanvasView(props: Props) {
       window.removeEventListener('mouseup', onUp)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewport, scene, selectionId, tool, spaceDown])
+  }, [viewport, scene, selectionIds, tool, spaceDown, preview])
+
+  /** Figma/Lunacy-style cursor for whatever is under the pointer. */
+  const hoverCursor = (wpt: { x: number; y: number }): string => {
+    if (spaceDown || tool === 'hand') return CURSOR_HAND
+    if (tool === 'text') return CURSOR_TEXT
+    if (tool !== 'select') return CURSOR_CROSSHAIR
+    const c = cornerHit(wpt)
+    if (c) {
+      const n = selectionId ? findAny(scene.nodes, selectionId) : null
+      return resizeCursor(CORNER_TO_HANDLE[c], n?.rotation ?? 0)
+    }
+    const h = handleHit(wpt)
+    if (h) {
+      const n = selectionId ? findAny(scene.nodes, selectionId) : null
+      return resizeCursor(h, n?.rotation ?? 0)
+    }
+    if (selectionId && rotateHit(wpt)) return CURSOR_ROTATE
+    const target = hitTest(scene.nodes, wpt)
+    if (target) return target.locked ? 'default' : CURSOR_MOVE
+    return 'default'
+  }
 
   const onDoubleClick = (e: React.MouseEvent) => {
     const wpt = toWorld(e)
     const hit = hitTest(scene.nodes, wpt)
     if (hit && hit.type === 'text') {
-      if (hit.id !== selectionId) props.select(hit.id)
+      if (!selectionIds.includes(hit.id)) props.select([hit.id])
       props.startTextEdit(hit.id)
     }
   }
@@ -765,13 +867,13 @@ export function CanvasView(props: Props) {
     e.preventDefault()
     const wpt = toWorld(e)
     const target = hitTest(scene.nodes, wpt)
-    if (target) props.select(target.id)
+    if (target && !selectionIds.includes(target.id)) props.select([target.id])
     setMenu({ sx: e.clientX, sy: e.clientY, wx: wpt.x, wy: wpt.y, nodeId: target?.id ?? null })
   }
 
   const contextMenu = menu ? (
     <div
-      className="absolute z-30 min-w-44 overflow-hidden rounded-lg border border-white/10 bg-neutral-950/95 p-1 text-[12px] text-neutral-200 shadow-2xl backdrop-blur-xl"
+      className="absolute z-30 min-w-44 overflow-hidden rounded-lg border border-white/10 bg-ink-925/95 p-1 text-[12px] text-neutral-200 shadow-2xl backdrop-blur-xl"
       style={{ left: menu.sx - (wrapRef.current?.getBoundingClientRect().left ?? 0), top: menu.sy - (wrapRef.current?.getBoundingClientRect().top ?? 0) }}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -784,8 +886,8 @@ export function CanvasView(props: Props) {
         </>
       ) : (
         <>
-          <MenuItem onClick={() => { const n = makeNode('rect', menu.wx, menu.wy, 160, 100); n.name = nextName(scene.nodes, 'rect'); props.addNode(n); props.select(n.id); setMenu(null) }}>Insert rectangle</MenuItem>
-          <MenuItem onClick={() => { const n = makeNode('text', menu.wx, menu.wy, 200, 32); n.name = nextName(scene.nodes, 'text'); props.addNode(n); props.select(n.id); setMenu(null) }}>Insert text</MenuItem>
+          <MenuItem onClick={() => { const n = makeNode('rect', menu.wx, menu.wy, 160, 100); n.name = nextName(scene.nodes, 'rect'); props.addNode(n); props.select([n.id]); setMenu(null) }}>Insert rectangle</MenuItem>
+          <MenuItem onClick={() => { const n = makeNode('text', menu.wx, menu.wy, 200, 32); n.name = nextName(scene.nodes, 'text'); props.addNode(n); props.select([n.id]); setMenu(null) }}>Insert text</MenuItem>
           <MenuItem onClick={() => { props.onFit(); setMenu(null) }}>Fit canvas</MenuItem>
         </>
       )}
@@ -849,14 +951,14 @@ export function CanvasView(props: Props) {
     : scene
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full overflow-hidden bg-neutral-800">
+    <div ref={wrapRef} className="relative h-full w-full overflow-hidden bg-ink-800">
       <canvas
         ref={canvasRef}
         className="absolute inset-0 h-full w-full"
         onMouseDown={onMouseDown}
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
-        style={{ cursor: spaceDown ? 'grab' : undefined }}
+        style={{ cursor: spaceDown || tool === 'hand' ? CURSOR_HAND : tool === 'select' ? undefined : tool === 'text' ? CURSOR_TEXT : CURSOR_CROSSHAIR }}
       />
       {props.peers && props.peers.length > 0 && (
         <PresenceLayer peers={props.peers} viewport={viewport} scene={scene} />
@@ -865,7 +967,7 @@ export function CanvasView(props: Props) {
       {contextMenu}
 
       {/* zoom controls */}
-      <div className="absolute bottom-3 right-3 z-10 flex items-center gap-0.5 rounded-lg border border-white/5 bg-neutral-900/70 p-0.5 shadow-panel backdrop-blur-xl select-none">
+      <div className="absolute bottom-3 right-3 z-10 flex items-center gap-0.5 rounded-lg border border-white/5 bg-ink-900/80 p-0.5 shadow-panel backdrop-blur-xl select-none">
         <ZoomBtn title="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
           <Minus size={12} strokeWidth={2} />
         </ZoomBtn>
@@ -881,7 +983,7 @@ export function CanvasView(props: Props) {
             onViewport({ zoom: 1, panX: cx - wx, panY: cy - wy })
           }}
           className="w-12 rounded-md py-1 text-center text-[11px] tabular-nums text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100"
-          title="Reset to 100%"
+          title="Reset to 100% (⌘0)"
         >
           {Math.round(viewport.zoom * 100)}%
         </button>
@@ -889,7 +991,7 @@ export function CanvasView(props: Props) {
           <Plus size={12} strokeWidth={2} />
         </ZoomBtn>
         <div className="mx-0.5 h-4 w-px bg-white/10" />
-        <ZoomBtn title="Fit scene" onClick={props.onFit}>
+        <ZoomBtn title="Fit scene (⌘1)" onClick={props.onFit}>
           <Maximize2 size={12} strokeWidth={2} />
         </ZoomBtn>
       </div>
@@ -974,18 +1076,18 @@ function cornerRadii(n: Node) {
   return n.cornerRadii ? { ...defaultCornerRadii(fallback), ...n.cornerRadii } : defaultCornerRadii(fallback)
 }
 
-function flattenNodes(nodes: Node[], exceptId: string | null, out: Node[] = []): Node[] {
+function flattenNodes(nodes: Node[], exceptIds: string[], out: Node[] = []): Node[] {
   for (const n of nodes) {
-    if (n.id !== exceptId && n.visible) out.push(n)
-    if (n.children) flattenNodes(n.children, exceptId, out)
+    if (!exceptIds.includes(n.id) && n.visible) out.push(n)
+    if (n.children) flattenNodes(n.children, exceptIds, out)
   }
   return out
 }
 
-function guideTargets(scene: Scene, exceptId: string | null) {
+function guideTargets(scene: Scene, exceptIds: string[]) {
   const xs = [0, scene.width / 2, scene.width]
   const ys = [0, scene.height / 2, scene.height]
-  for (const n of flattenNodes(scene.nodes, exceptId)) {
+  for (const n of flattenNodes(scene.nodes, exceptIds)) {
     xs.push(n.x, n.x + n.width / 2, n.x + n.width)
     ys.push(n.y, n.y + n.height / 2, n.y + n.height)
   }
@@ -1003,9 +1105,9 @@ function snapValue(v: number, targets: number[], tolerance: number): { v: number
   return { v: best, guide }
 }
 
-function snapRectToGuides(rect: { x: number; y: number; w: number; h: number }, scene: Scene, exceptId: string | null, viewport: Viewport) {
+function snapRectToGuides(rect: { x: number; y: number; w: number; h: number }, scene: Scene, exceptIds: string[], viewport: Viewport) {
   const tol = 7 / viewport.zoom
-  const targets = guideTargets(scene, exceptId)
+  const targets = guideTargets(scene, exceptIds)
   const xCandidates = [{ p: rect.x, off: 0 }, { p: rect.x + rect.w / 2, off: rect.w / 2 }, { p: rect.x + rect.w, off: rect.w }]
   const yCandidates = [{ p: rect.y, off: 0 }, { p: rect.y + rect.h / 2, off: rect.h / 2 }, { p: rect.y + rect.h, off: rect.h }]
   let x = rect.x, y = rect.y
@@ -1021,9 +1123,9 @@ function snapRectToGuides(rect: { x: number; y: number; w: number; h: number }, 
   return { x, y, guides }
 }
 
-function snapPointToGuides(p: { x: number; y: number }, scene: Scene, exceptId: string | null, viewport: Viewport) {
+function snapPointToGuides(p: { x: number; y: number }, scene: Scene, exceptIds: string[], viewport: Viewport) {
   const tol = 7 / viewport.zoom
-  const targets = guideTargets(scene, exceptId)
+  const targets = guideTargets(scene, exceptIds)
   const sx = snapValue(p.x, targets.xs, tol)
   const sy = snapValue(p.y, targets.ys, tol)
   return { x: sx.v, y: sy.v, guides: { x: sx.guide !== undefined ? [sx.guide] : undefined, y: sy.guide !== undefined ? [sy.guide] : undefined } }
@@ -1045,13 +1147,13 @@ function constrainDrawPoint(tool: 'rect' | 'ellipse' | 'line', start: { x: numbe
 
 function drawPasteboardGrid(ctx: CanvasRenderingContext2D, w: number, h: number, viewport: Viewport) {
   ctx.save()
-  ctx.fillStyle = '#262626'
+  ctx.fillStyle = '#1b1b1b'
   ctx.fillRect(0, 0, w, h)
-  const minor = 20 * viewport.zoom
-  if (minor >= 6) {
+  const minor = 24 * viewport.zoom
+  if (minor >= 7) {
     const ox = ((viewport.panX % minor) + minor) % minor
     const oy = ((viewport.panY % minor) + minor) % minor
-    ctx.fillStyle = 'rgba(255,255,255,0.10)'
+    ctx.fillStyle = 'rgba(255,255,255,0.07)'
     for (let x = ox; x < w; x += minor) for (let y = oy; y < h; y += minor) ctx.fillRect(Math.round(x), Math.round(y), 1, 1)
   }
   ctx.restore()

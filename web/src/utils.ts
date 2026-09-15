@@ -85,13 +85,13 @@ export function makeNode(type: NodeType, x: number, y: number, w: number, h: num
     opacity: 1,
     visible: true,
     locked: false,
-    fill: type === 'rect' || type === 'frame' ? '#ffffff' : type === 'ellipse' ? '#ffffff' : null,
+    fill: type === 'rect' || type === 'ellipse' ? '#ffffff' : null,
     stroke: null,
     effects: [],
   }
   switch (type) {
     case 'frame':
-      base.fill = null
+      base.fill = '#1d1d1d'
       base.children = []
       base.cornerRadius = 0
       base.cornerRadii = defaultCornerRadii(0)
@@ -112,6 +112,10 @@ export function makeNode(type: NodeType, x: number, y: number, w: number, h: num
       base.width = 200
       base.height = 32
       base.text = { content: 'Text', fontSize: 24, fontWeight: 400, color: '#ffffff', align: 'left' }
+      break
+    case 'icon':
+      base.fill = null
+      base.icon = { svg: '', color: '#ffffff' }
       break
   }
   return base

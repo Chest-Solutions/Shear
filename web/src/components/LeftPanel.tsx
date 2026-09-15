@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Box, Circle, Lock, LockOpen, Minus, Square, Type, Eye, EyeOff, Plus, X } from 'lucide-react'
-import type { Node, Scene } from '../types'
+import { Box, Circle, Lock, LockOpen, Minus, Square, Type, Eye, EyeOff, Plus, X, Sparkles, Palette, Layers } from 'lucide-react'
+import type { ColorVariable, Node, Scene } from '../types'
+import type { IconDef } from '../icons/library'
+import { IconsPanel } from './IconsPanel'
+import { ColorsPanel } from './ColorsPanel'
 
 const TYPE_ICON: Record<Node['type'], React.ReactNode> = {
   frame: <Box size={12} strokeWidth={1.8} />,
@@ -9,7 +12,10 @@ const TYPE_ICON: Record<Node['type'], React.ReactNode> = {
   ellipse: <Circle size={12} strokeWidth={1.8} />,
   line: <Minus size={12} strokeWidth={1.8} />,
   text: <Type size={12} strokeWidth={1.8} />,
+  icon: <Sparkles size={12} strokeWidth={1.8} />,
 }
+
+type Tab = 'layers' | 'icons' | 'colors'
 
 interface Props {
   scene: Scene
@@ -25,10 +31,15 @@ interface Props {
   onAddScene: () => void
   onRenameScene: (id: string, name: string) => void
   onDeleteScene: (id: string) => void
+  variables: ColorVariable[]
+  onVariables: (next: ColorVariable[]) => void
+  variableUsage: (id: string) => number
+  onInsertIcon: (icon: IconDef) => void
 }
 
 export function LeftPanel(props: Props) {
   const { scene } = props
+  const [tab, setTab] = useState<Tab>('layers')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropBefore, setDropBefore] = useState<string | null | 'end'>(null)
@@ -73,69 +84,110 @@ export function LeftPanel(props: Props) {
     ))
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-white/5 bg-neutral-900/60 backdrop-blur-xl">
-      <div className="flex items-center justify-between px-3 pb-1 pt-3">
-        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">Layers</span>
-      </div>
-      <div className="flex-1 overflow-y-auto px-1.5 pb-2">
-        {scene.nodes.length === 0 ? (
-          <p className="px-1.5 py-3 text-[11px] leading-relaxed text-neutral-600">
-            Pick a tool and draw on the canvas.
-          </p>
-        ) : (
-          <>{layerRows(scene.nodes, 0)}</>
-        )}
-        {dragId && (
-          <div
-            className="mx-1.5 mt-0.5 h-4 rounded"
-            onDragOver={(e) => {
-              e.preventDefault()
-              setDropBefore('end')
-            }}
-            onDrop={() => {
-              if (dragId) props.onReorder(dragId, null)
-              setDragId(null)
-              setDropBefore(null)
-            }}
-          >
-            {dropBefore === 'end' && <div className="h-px w-full rounded bg-white/60" />}
-          </div>
-        )}
+    <aside className="flex w-60 shrink-0 flex-col border-r border-white/5 bg-ink-850">
+      {/* tab bar */}
+      <div className="flex items-center gap-0.5 border-b border-white/5 px-1.5 pt-1.5">
+        <TabBtn active={tab === 'layers'} onClick={() => setTab('layers')} title="Layers & scenes">
+          <Layers size={13} strokeWidth={1.8} />
+        </TabBtn>
+        <TabBtn active={tab === 'icons'} onClick={() => setTab('icons')} title="Icon library — Lucide + Heroicons">
+          <Sparkles size={13} strokeWidth={1.8} />
+        </TabBtn>
+        <TabBtn active={tab === 'colors'} onClick={() => setTab('colors')} title="Color variables">
+          <Palette size={13} strokeWidth={1.8} />
+        </TabBtn>
       </div>
 
-      <div className="border-t border-white/5">
-        <div className="flex items-center justify-between px-3 pb-1 pt-3">
-          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">Scenes</span>
-          <button
-            onClick={props.onAddScene}
-            title="Add scene"
-            className="flex h-5 w-5 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-white/10 hover:text-neutral-100"
-          >
-            <Plus size={12} strokeWidth={2} />
-          </button>
+      {tab === 'icons' ? (
+        <div className="min-h-0 flex-1">
+          <IconsPanel onInsert={props.onInsertIcon} />
         </div>
-        <div className="max-h-40 overflow-y-auto px-1.5 pb-2">
-          <AnimatePresence initial={false}>
-            {props.scenes.map((s) => (
-              <SceneRow
-                key={s.id}
-                scene={s}
-                active={s.id === props.activeSceneId}
-                canDelete={props.scenes.length > 1}
-                renaming={renaming === `scene:${s.id}`}
-                onSelect={() => props.onSelectScene(s.id)}
-                onStartRename={() => setRenaming(`scene:${s.id}`)}
-                onCommitRename={(name) => {
-                  props.onRenameScene(s.id, name)
-                  setRenaming(null)
+      ) : tab === 'colors' ? (
+        <div className="min-h-0 flex-1">
+          <ColorsPanel variables={props.variables} onChange={props.onVariables} usage={props.variableUsage} />
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between px-3 pb-1 pt-3">
+            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">Layers</span>
+          </div>
+          <div className="flex-1 overflow-y-auto px-1.5 pb-2">
+            {scene.nodes.length === 0 ? (
+              <p className="px-1.5 py-3 text-[11px] leading-relaxed text-neutral-600">
+                Pick a tool and draw on the canvas.
+              </p>
+            ) : (
+              <>{layerRows(scene.nodes, 0)}</>
+            )}
+            {dragId && (
+              <div
+                className="mx-1.5 mt-0.5 h-4 rounded"
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setDropBefore('end')
                 }}
-                onDelete={() => props.onDeleteScene(s.id)}
-              />
-            ))}
-          </AnimatePresence>
-        </div>
-      </div>
+                onDrop={() => {
+                  if (dragId) props.onReorder(dragId, null)
+                  setDragId(null)
+                  setDropBefore(null)
+                }}
+              >
+                {dropBefore === 'end' && <div className="h-px w-full rounded bg-white/60" />}
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-white/5">
+            <div className="flex items-center justify-between px-3 pb-1 pt-3">
+              <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">Scenes</span>
+              <button
+                onClick={props.onAddScene}
+                title="Add scene"
+                className="flex h-5 w-5 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-white/10 hover:text-neutral-100"
+              >
+                <Plus size={12} strokeWidth={2} />
+              </button>
+            </div>
+            <div className="max-h-40 overflow-y-auto px-1.5 pb-2">
+              <AnimatePresence initial={false}>
+                {props.scenes.map((s) => (
+                  <SceneRow
+                    key={s.id}
+                    scene={s}
+                    active={s.id === props.activeSceneId}
+                    canDelete={props.scenes.length > 1}
+                    renaming={renaming === `scene:${s.id}`}
+                    onSelect={() => props.onSelectScene(s.id)}
+                    onStartRename={() => setRenaming(`scene:${s.id}`)}
+                    onCommitRename={(name) => {
+                      props.onRenameScene(s.id, name)
+                      setRenaming(null)
+                    }}
+                    onDelete={() => props.onDeleteScene(s.id)}
+                  />
+                ))}
+              </AnimatePresence>
+            </div>
+          </div>
+        </>
+      )}
     </aside>
+  )
+}
+
+function TabBtn({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      className={`relative flex h-7 flex-1 items-center justify-center rounded-md transition-colors ${
+        active ? 'text-neutral-100' : 'text-neutral-500 hover:bg-white/5 hover:text-neutral-300'
+      }`}
+    >
+      {active && <span className="absolute inset-0 rounded-md bg-white/10" />}
+      <span className="relative">{children}</span>
+      {active && <span className="absolute -bottom-[7px] left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-white" />}
+    </button>
   )
 }
 

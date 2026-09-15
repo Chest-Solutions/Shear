@@ -34,6 +34,42 @@ function roundedPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: num
 const UI_FONT =
   "-apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, 'Segoe UI', Helvetica, Arial, sans-serif"
 
+// ---- icon raster cache -------------------------------------------------
+// Icons are stored as SVG markup; the canvas draws them through an Image
+// decoded from a data-URL. Decoding is async, so the first draw shows a
+// faint placeholder and `onIconReady` lets the canvas repaint once the
+// glyphs land.
+
+const iconImages = new Map<string, HTMLImageElement>()
+const iconListeners = new Set<() => void>()
+
+/** Subscribe to "an icon image finished decoding" — returns unsubscribe. */
+export function onIconReady(fn: () => void): () => void {
+  iconListeners.add(fn)
+  return () => {
+    iconListeners.delete(fn)
+  }
+}
+
+function tintedIconSVG(n: Node): string {
+  const color = n.icon?.color || '#ffffff'
+  return (n.icon?.svg ?? '').split('currentColor').join(color)
+}
+
+function getIconImage(n: Node): HTMLImageElement | null {
+  if (!n.icon?.svg) return null
+  const key = (n.icon.color || '#ffffff') + '|' + n.icon.svg
+  let img = iconImages.get(key)
+  if (!img) {
+    img = new Image()
+    img.decoding = 'async'
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(tintedIconSVG(n))
+    iconImages.set(key, img)
+    img.onload = () => iconListeners.forEach((fn) => fn())
+  }
+  return img.complete && img.naturalWidth > 0 ? img : null
+}
+
 function filters(n: Node): string {
   const parts: string[] = []
   for (const e of n.effects ?? []) if (e.visible && e.type === 'layer-blur' && e.blur > 0) parts.push(`blur(${e.blur}px)`)
@@ -112,6 +148,19 @@ function drawGeometry(ctx: CanvasRenderingContext2D, n: Node, shadow = false) {
     case 'text':
       if (!shadow) drawText(ctx, n)
       break
+    case 'icon': {
+      if (shadow) break
+      const img = getIconImage(n)
+      if (img) {
+        ctx.drawImage(img, 0, 0, n.width, n.height)
+      } else {
+        // placeholder until the glyph decodes
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+        ctx.lineWidth = 1
+        ctx.strokeRect(0.5, 0.5, Math.max(0, n.width - 1), Math.max(0, n.height - 1))
+      }
+      break
+    }
   }
 }
 

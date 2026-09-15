@@ -300,8 +300,13 @@ func (s *Server) handlePresence(w http.ResponseWriter, r *http.Request) {
 	sess.mu.Lock()
 	p, ok := sess.peers[req.Peer]
 	if ok {
-		p.X, p.Y = req.X, req.Y
-		p.SceneID, p.Selection, p.Active = req.SceneID, req.Selection, req.Active
+		// x<0 is a lease heartbeat: refresh seenAt without moving the
+		// cursor or clobbering the peer's scene/selection.
+		if req.X >= 0 || req.Y >= 0 {
+			p.X, p.Y = req.X, req.Y
+			p.SceneID, p.Selection, p.Active = req.SceneID, req.Selection, req.Active
+			sess.broadcast(p.ID, "presence", p)
+		}
 		if req.Name != "" {
 			p.Name = req.Name
 		}
@@ -309,7 +314,6 @@ func (s *Server) handlePresence(w http.ResponseWriter, r *http.Request) {
 			p.Color = req.Color
 		}
 		p.seenAt = time.Now()
-		sess.broadcast(p.ID, "presence", p)
 	}
 	sess.mu.Unlock()
 	if !ok {

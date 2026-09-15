@@ -1,6 +1,6 @@
-export type NodeType = 'frame' | 'rect' | 'ellipse' | 'line' | 'text'
+export type NodeType = 'frame' | 'rect' | 'ellipse' | 'line' | 'text' | 'icon'
 export type TextAlign = 'left' | 'center' | 'right'
-export type Tool = 'select' | 'rect' | 'ellipse' | 'line' | 'text'
+export type Tool = 'select' | 'hand' | 'frame' | 'rect' | 'ellipse' | 'line' | 'text'
 
 export interface Stroke {
   color: string
@@ -13,6 +13,14 @@ export interface TextData {
   fontWeight: number
   color: string
   align: TextAlign
+}
+
+/** An icon from the built-in library (Lucide / Heroicons). */
+export interface IconData {
+  /** standalone `<svg>` markup using currentColor */
+  svg: string
+  /** tint applied in place of currentColor */
+  color: string
 }
 
 export interface CornerRadii {
@@ -43,22 +51,6 @@ export interface BlurEffect {
 
 export type Effect = ShadowEffect | BlurEffect
 
-/**
- * Image adjustments. Every value is an offset from normal, so 0 always
- * means "untouched" — that is what makes the sliders centre correctly
- * and reset predictably.
- */
-export interface Adjust {
-  brightness: number // -100..100
-  contrast: number   // -100..100
-  saturation: number // -100..100
-  temperature: number // -100 (cool) .. 100 (warm)
-  hue: number        // -180..180
-  blur: number       // 0..50 px
-  grayscale: number  // 0..100
-  invert: number     // 0..100
-}
-
 export type Trigger = 'view' | 'hover' | 'click' | 'loop'
 
 /** Anything that can be keyframed. */
@@ -79,6 +71,22 @@ export type AnimProp =
   | 'radius'
 
 export type KeyValue = number | string
+
+/**
+ * Legacy image adjustments. The editing UI for these CSS filters was
+ * removed — old documents may still carry the data, and it keeps
+ * playing/exporting.
+ */
+export interface Adjust {
+  brightness: number
+  contrast: number
+  saturation: number
+  temperature: number
+  hue: number
+  blur: number
+  grayscale: number
+  invert: number
+}
 
 /** One keyframe: a value at a time, plus the curve leading out of it. */
 export interface Keyframe {
@@ -116,14 +124,20 @@ export interface Node {
   visible: boolean
   locked: boolean
   fill: string | null
+  /** ids of the color variable each color tracks (Figma-style variables) */
+  fillVar?: string
+  strokeVar?: string
+  textVar?: string
   stroke: Stroke | null
   cornerRadius?: number
   cornerRadii?: CornerRadii
   effects?: Effect[]
+  /** legacy CSS-filter adjustments (no longer editable, still honoured) */
   adjust?: Adjust
   timeline?: Timeline
   flip?: boolean // line only; true draws the opposite diagonal (/ instead of \)
   text?: TextData // text only
+  icon?: IconData // icon only
   children?: Node[] // frame only
 }
 
@@ -133,7 +147,15 @@ export interface Scene {
   width: number
   height: number
   background: string
+  backgroundVar?: string
   nodes: Node[]
+}
+
+/** A named, reusable color on the document. */
+export interface ColorVariable {
+  id: string
+  name: string
+  color: string
 }
 
 export interface Document {
@@ -144,6 +166,7 @@ export interface Document {
   updatedAt: string
   selectedSceneId: string
   scenes: Scene[]
+  variables?: ColorVariable[]
 }
 
 export interface Peer {
@@ -157,7 +180,7 @@ export interface Peer {
   active: boolean
 }
 
-export const ANIM_PROP_LABEL: Record<AnimProp, string> = {
+export const ANIM_PROP_LABEL: Record<string, string> = {
   x: 'X',
   y: 'Y',
   width: 'Width',
@@ -176,8 +199,7 @@ export const ANIM_PROP_LABEL: Record<AnimProp, string> = {
 
 /** Properties offered in the "add track" menu, in a sensible order. */
 export const ANIM_PROPS: AnimProp[] = [
-  'x', 'y', 'width', 'height', 'rotation', 'scale', 'opacity',
-  'fill', 'radius', 'blur', 'brightness', 'contrast', 'saturation', 'hue',
+  'x', 'y', 'width', 'height', 'rotation', 'scale', 'opacity', 'fill', 'radius',
 ]
 
 export const TRIGGER_LABEL: Record<Trigger, string> = {
@@ -193,4 +215,5 @@ export const NODE_TYPE_LABEL: Record<NodeType, string> = {
   ellipse: 'Ellipse',
   line: 'Line',
   text: 'Text',
+  icon: 'Icon',
 }

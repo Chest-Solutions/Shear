@@ -9,7 +9,7 @@ body,
 }
 
 body {
-  background: #262626;
+  background: #121212;
   color: #e5e5e5;
   font-family:
     -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, 'Segoe UI', Helvetica, Arial, sans-serif;
@@ -25,18 +25,18 @@ textarea {
 /* minimal scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.11);
   border-radius: 8px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.2);
 }
 *::-webkit-scrollbar-track {
   background: transparent;
@@ -54,7 +54,7 @@ input[type='number'] {
 }
 
 ::selection {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 /* Range sliders: a small neutral thumb on the track drawn behind it. */
@@ -83,4 +83,21 @@ input[type='range'].slider::-moz-range-thumb {
 }
 input[type='range'].slider::-moz-range-track {
   background: transparent;
+}
+
+/* The native color input renders its own swatch chrome; we hide it and
+   paint our own swatch behind the field. */
+input[type='color'] {
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type='color']::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
 }
