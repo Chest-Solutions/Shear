@@ -108,9 +108,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls release-stage/*.zip >/dev/null 2>&1 || { echo "nothing staged"; exit 0; }
+          tag="$(cat release-stage/RELEASE_TAG 2>/dev/null || echo v2.0.0)"
+          title="$(cat release-stage/RELEASE_TITLE 2>/dev/null || echo "Shear 2.0")"
           sha="$(git rev-parse --short HEAD)"
-          gh release create v2.0.0 --target "$GITHUB_SHA" \
-            --title "Shear 2.0" \
+          gh release create "$tag" --target "$GITHUB_SHA" \
+            --title "$title" \
             --notes "Binaries built in the Arena session with a from-scratch Go 1.23.0 toolchain and verified there by the full two-peer collaboration e2e; published through CI.
 
           Run \`./shear\` (or \`shear.exe\`) — serves the editor + API on :8080.
@@ -127,7 +129,7 @@ jobs:
           git config user.name "shear-ci"
           git config user.email "ci@shear.local"
           git rm -r -q release-stage
-          git commit -m "ci: publish v2.0.0 assets, unstage binaries"
+          git commit -m "ci: publish $tag assets, unstage binaries"
           git pull --rebase origin "$GITHUB_REF_NAME" || true
           git push origin "HEAD:$GITHUB_REF_NAME"
 
