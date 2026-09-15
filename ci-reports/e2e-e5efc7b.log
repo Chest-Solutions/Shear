@@ -1,0 +1,25 @@
+PASS  GET /api/health
+PASS  GET / serves the app
+PASS  GET /join/<id> serves the SPA (no redirect loop)
+PASS  PUT /api/documents/{id}
+PASS  GET /api/documents/{id} returns icon + variables
+PASS  GET /api/documents lists it
+PASS  SVG export embeds the icon
+PASS  HTML export embeds the icon
+PASS  PNG export renders
+PASS  POST /api/sessions opens a room
+PASS  share url points at /join/
+PASS  host peer joins (hello)
+PASS  second peer joins (hello)
+PASS  host sees the guest in the peer list
+PASS  document POST accepted
+PASS  guest receives the edit
+PASS  guest receives the host cursor
+PASS  reconnect gets the latest document
+PASS  peer list still has exactly one Ana after reconnect
+PASS  reconnected host receives the guest edit
+PASS  unknown session is a 404
+PASS  ghost presence rejected (409)
+PASS  DELETE /api/documents/{id}
+
+E2E: ALL CHECKS PASSED
