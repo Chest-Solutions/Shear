@@ -1,0 +1,11 @@
+=== go vet ===
+go: downloading github.com/golang/image v0.24.0
+go: downloading github.com/golang/text v0.22.0
+
+=== go test ===
+?   	shear	[no test files]
+--- FAIL: TestTwoPeersCollaborate (0.00s)
+    collab_integration_test.go:195: after reconnect peer list has 0 Ana entries: [{"id":"p_bea","name":"Bea","color":"#F7768E","x":0,"y":0,"sceneId":"s1","selection":"","active":true}]
+FAIL
+FAIL	shear/internal/app	0.218s
+FAIL
