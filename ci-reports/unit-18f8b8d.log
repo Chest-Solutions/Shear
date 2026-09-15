@@ -1,0 +1,7 @@
+=== go vet ===
+go: downloading github.com/golang/image v0.24.0
+go: downloading github.com/golang/text v0.22.0
+
+=== go test ===
+?   	shear	[no test files]
+ok  	shear/internal/app	0.219s
