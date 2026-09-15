@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Pause, Play, RotateCcw, X } from 'lucide-react'
 import type { Node, Scene } from '../types'
+import { shapeSVG } from '../exporters'
 import { adjustCSS, resolveNodes, sceneDuration, sceneLoops } from '../anim'
 import { defaultCornerRadii } from '../utils'
 
@@ -145,6 +146,9 @@ function PreviewNode({ node }: { node: Node }) {
     <div style={nodeStyle(node)}>
       {node.type === 'text' ? node.text?.content : null}
       {node.type === 'icon' && node.icon ? <IconGlyph node={node} /> : null}
+      {node.type === 'poly' || (node.type === 'line' && node.arrow) ? (
+        <span style={{ display: 'block', width: '100%', height: '100%' }} dangerouslySetInnerHTML={{ __html: shapeSVG(node) }} />
+      ) : null}
       {node.children?.map((c) => (
         <PreviewNode key={c.id} node={c} />
       ))}
@@ -185,7 +189,11 @@ export function nodeStyle(n: Node): React.CSSProperties {
   if (n.type === 'line') {
     style.background = undefined
     style.border = undefined
-    style.borderTop = `${n.stroke?.width ?? 1}px solid ${n.stroke?.color ?? '#ffffff'}`
+    if (!n.arrow) style.borderTop = `${n.stroke?.width ?? 1}px solid ${n.stroke?.color ?? '#ffffff'}`
+  }
+  if (n.type === 'poly') {
+    style.background = undefined
+    style.border = undefined
   }
   if (n.type === 'text' && n.text) {
     style.color = n.text.color

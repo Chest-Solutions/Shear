@@ -7,7 +7,7 @@
  * when the backend can't be reached, so exports never fail outright.
  */
 import type { Node, Scene } from './types'
-import { defaultCornerRadii, slug } from './utils'
+import { arrowHead, defaultCornerRadii, lineEnds, polyPoints, ptsAttr, slug } from './utils'
 import { drawScene } from './render'
 
 // ---------------------------------------------------------------- helpers
@@ -66,6 +66,8 @@ export function sceneToSVG(s: Scene): string {
       const stroke = n.stroke && n.stroke.width > 0 ? ` stroke="${n.stroke.color}" stroke-width="${num(n.stroke.width)}"` : ''
       switch (n.type) {
         case 'frame':
+          // legacy frames export as invisible groups
+          break
         case 'rect':
           parts.push(`<rect x="${num(x)}" y="${num(y)}" width="${num(n.width)}" height="${num(n.height)}" rx="${num(Math.min(r.tl, Math.min(n.width, n.height) / 2))}" fill="${fill}"${stroke}/>`)
           break
@@ -73,11 +75,22 @@ export function sceneToSVG(s: Scene): string {
           parts.push(`<ellipse cx="${num(x + n.width / 2)}" cy="${num(y + n.height / 2)}" rx="${num(n.width / 2)}" ry="${num(n.height / 2)}" fill="${fill}"${stroke}/>`)
           break
         case 'line': {
-          const x1 = n.flip ? x + n.width : x
-          const x2 = n.flip ? x : x + n.width
-          parts.push(`<line x1="${num(x1)}" y1="${num(y)}" x2="${num(x2)}" y2="${num(y + n.height)}" stroke="${n.stroke?.color ?? '#ffffff'}" stroke-width="${num(n.stroke?.width ?? 2)}" stroke-linecap="round"/>`)
+          const [lx1, ly1, lx2, ly2] = lineEnds(n)
+          const col = n.stroke?.color ?? '#ffffff'
+          const wdt = n.stroke?.width ?? 2
+          if (n.arrow) {
+            const ang = Math.atan2(ly2 - ly1, lx2 - lx1)
+            const len = Math.max(10, wdt * 4) * 0.7
+            parts.push(`<line x1="${num(x + lx1)}" y1="${num(y + ly1)}" x2="${num(x + lx2 - Math.cos(ang) * len)}" y2="${num(y + ly2 - Math.sin(ang) * len)}" stroke="${col}" stroke-width="${num(wdt)}" stroke-linecap="round"/>`)
+            parts.push(`<polygon points="${ptsAttr(arrowHead(n), x, y)}" fill="${col}"/>`)
+          } else {
+            parts.push(`<line x1="${num(x + lx1)}" y1="${num(y + ly1)}" x2="${num(x + lx2)}" y2="${num(y + ly2)}" stroke="${col}" stroke-width="${num(wdt)}" stroke-linecap="round"/>`)
+          }
           break
         }
+        case 'poly':
+          parts.push(`<polygon points="${ptsAttr(polyPoints(n), x, y)}" fill="${fill}"${stroke}/>` )
+          break
         case 'text':
           if (n.text) {
             const anchor = n.text.align === 'center' ? 'middle' : n.text.align === 'right' ? 'end' : 'start'
@@ -106,6 +119,23 @@ export function sceneToSVG(s: Scene): string {
   return parts.join('\n')
 }
 
+/** Inline SVG for shapes CSS can't express (poly, arrow lines). */
+export function shapeSVG(n: Node): string {
+  const col = n.stroke?.color ?? '#ffffff'
+  const wdt = n.stroke?.width ?? 2
+  const inner: string[] = []
+  if (n.type === 'poly') {
+    inner.push(`<polygon points="${ptsAttr(polyPoints(n))}" fill="${n.fill ?? 'none'}"${n.stroke && n.stroke.width > 0 ? ` stroke="${n.stroke.color}" stroke-width="${num(n.stroke.width)}" stroke-linejoin="round"` : ''}/>` )
+  } else if (n.type === 'line' && n.arrow) {
+    const [x1, y1, x2, y2] = lineEnds(n)
+    const ang = Math.atan2(y2 - y1, x2 - x1)
+    const len = Math.max(10, wdt * 4) * 0.7
+    inner.push(`<line x1="${num(x1)}" y1="${num(y1)}" x2="${num(x2 - Math.cos(ang) * len)}" y2="${num(y2 - Math.sin(ang) * len)}" stroke="${col}" stroke-width="${num(wdt)}" stroke-linecap="round"/>`)
+    inner.push(`<polygon points="${ptsAttr(arrowHead(n))}" fill="${col}"/>`)
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(n.width)} ${num(n.height)}" style="width:100%;height:100%;display:block;overflow:visible" preserveAspectRatio="none">${inner.join('')}</svg>`
+}
+
 function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
@@ -118,7 +148,8 @@ export function sceneToHTML(s: Scene): string {
   const walk = (list: Node[], indent: string) => {
     for (const n of list) {
       if (!n.visible) continue
-      body.push(`${indent}<div style="${nodeCSS(n)}">${n.type === 'text' ? escapeXml(n.text?.content ?? '') : n.type === 'icon' && n.icon ? iconHTML(n) : ''}`)
+      const shape = n.type === 'poly' || (n.type === 'line' && n.arrow) ? shapeSVG(n) : ''
+      body.push(`${indent}<div style="${nodeCSS(n)}">${n.type === 'text' ? escapeXml(n.text?.content ?? '') : n.type === 'icon' && n.icon ? iconHTML(n) : shape}`)
       if (n.children?.length) walk(n.children, indent + '  ')
       body.push(`${indent}</div>`)
     }
@@ -155,6 +186,17 @@ function iconHTML(n: Node): string {
 /** Node → CSS declarations, shared by the HTML and React exporters. */
 export function nodeCSS(n: Node): string {
   const r = radii(n)
+  if (n.type === 'poly' || (n.type === 'line' && n.arrow)) {
+    const pos = [
+      `left:${num(n.x)}px`,
+      `top:${num(n.y)}px`,
+      `width:${num(n.width)}px`,
+      `height:${num(n.height)}px`,
+    ]
+    if (n.opacity < 1) pos.push(`opacity:${num(n.opacity)}`)
+    if (n.rotation) pos.push(`transform:rotate(${num(n.rotation)}deg)`)
+    return pos.join(';')
+  }
   const style: string[] = [
     `left:${num(n.x)}px`,
     `top:${num(n.y)}px`,
@@ -206,6 +248,10 @@ export function sceneToReact(s: Scene): string {
       const style = reactStyle(n)
       if (n.type === 'icon' && n.icon) {
         body.push(`${indent}<div style={${style}} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(iconHTML(n))} }} />`)
+        continue
+      }
+      if (n.type === 'poly' || (n.type === 'line' && n.arrow)) {
+        body.push(`${indent}<div style={${style}} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(shapeSVG(n))} }} />`)
         continue
       }
       const content = n.type === 'text' ? escapeXml(n.text?.content ?? '') : ''

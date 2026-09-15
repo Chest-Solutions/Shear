@@ -105,8 +105,26 @@ func svgNode(body, defs *strings.Builder, n Node, ctr *int) {
 		if n.Flip {
 			x1, x2 = n.X+n.Width, n.X
 		}
-		fmt.Fprintf(body, `<line x1="%s" y1="%s" x2="%s" y2="%s" stroke-linecap="round"%s/>`+"\n",
-			num(x1), num(y1), num(x2), num(y2), defaultStroke(stroke))
+		if n.Arrow {
+			ang := math.Atan2(y2-y1, x2-x1)
+			sw := 2.0
+			if n.Stroke != nil && n.Stroke.Width > 0 {
+				sw = n.Stroke.Width
+			}
+			col := "#ffffff"
+			if n.Stroke != nil {
+				col = n.Stroke.Color
+			}
+			ln := math.Max(10, sw*4) * 0.7
+			fmt.Fprintf(body, `<line x1="%s" y1="%s" x2="%s" y2="%s" stroke-linecap="round"%s/>`+"\n",
+				num(x1), num(y1), num(x2-math.Cos(ang)*ln), num(y2-math.Sin(ang)*ln), defaultStroke(stroke))
+			fmt.Fprintf(body, `<polygon points="%s" fill="%s"/>`+"\n", polyAttr(arrowHeadPts(n, 0, 0)), col)
+		} else {
+			fmt.Fprintf(body, `<line x1="%s" y1="%s" x2="%s" y2="%s" stroke-linecap="round"%s/>`+"\n",
+				num(x1), num(y1), num(x2), num(y2), defaultStroke(stroke))
+		}
+	case NodePoly:
+		fmt.Fprintf(body, `<polygon points="%s" fill="%s"%s/>`+"\n", polyAttr(polyPoints(n, 0, 0)), attr(fill), stroke)
 	case NodeText:
 		if n.Text != nil {
 			svgText(body, n)
@@ -156,6 +174,51 @@ func svgText(body *strings.Builder, n Node) {
 		fmt.Fprintf(body, `<tspan x="%s" dy="%s">%s</tspan>`, num(x), num(float64(boolInt(i > 0))*lineHeight), html.EscapeString(line))
 	}
 	body.WriteString("</text>\n")
+}
+
+func polyAttr(pts [][2]float64) string {
+	var b strings.Builder
+	for i, p := range pts {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		fmt.Fprintf(&b, "%s,%s", num(p[0]), num(p[1]))
+	}
+	return b.String()
+}
+
+// polySVG renders poly / arrow-line nodes as an inline <svg> for the HTML
+// exporter, where CSS cannot express arbitrary outlines.
+func polySVG(n Node) string {
+	col := "#ffffff"
+	w := 2.0
+	if n.Stroke != nil {
+		col, w = n.Stroke.Color, n.Stroke.Width
+	}
+	var inner strings.Builder
+	if n.Type == NodePoly {
+		fill := "none"
+		if n.Fill != nil {
+			fill = *n.Fill
+		}
+		st := ""
+		if n.Stroke != nil && n.Stroke.Width > 0 {
+			st = fmt.Sprintf(` stroke="%s" stroke-width="%s" stroke-linejoin="round"`, n.Stroke.Color, num(n.Stroke.Width))
+		}
+		fmt.Fprintf(&inner, `<polygon points="%s" fill="%s"%s/>`, polyAttr(polyPoints(n, 0, 0)), fill, st)
+	} else if n.Type == NodeLine && n.Arrow {
+		x1, y1, x2, y2 := 0.0, 0.0, n.Width, n.Height
+		if n.Flip {
+			x1, x2 = x2, x1
+		}
+		ang := math.Atan2(y2-y1, x2-x1)
+		ln := math.Max(10, w*4) * 0.7
+		fmt.Fprintf(&inner, `<line x1="%s" y1="%s" x2="%s" y2="%s" stroke="%s" stroke-width="%s" stroke-linecap="round"/>`,
+			num(x1), num(y1), num(x2-math.Cos(ang)*ln), num(y2-math.Sin(ang)*ln), col, num(w))
+		fmt.Fprintf(&inner, `<polygon points="%s" fill="%s"/>`, polyAttr(arrowHeadPts(n, 0, 0)), col)
+	}
+	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %s %s" style="width:100%%;height:100%%;display:block;overflow:visible" preserveAspectRatio="none">%s</svg>`,
+		num(n.Width), num(n.Height), inner.String())
 }
 
 func defaultStroke(s string) string {
@@ -241,10 +304,10 @@ func htmlNode(body, css *strings.Builder, n Node, ctr *int, indent int) {
 	if n.Rotation != 0 {
 		style = append(style, "transform:rotate("+num(n.Rotation)+"deg)")
 	}
-	if n.Fill != nil {
+	if n.Fill != nil && n.Type != NodePoly {
 		style = append(style, "background:"+*n.Fill)
 	}
-	if n.Stroke != nil && n.Stroke.Width > 0 {
+	if n.Stroke != nil && n.Stroke.Width > 0 && n.Type != NodePoly {
 		style = append(style, fmt.Sprintf("border:%spx solid %s", num(n.Stroke.Width), n.Stroke.Color))
 	}
 	if r := nodeRadii(n); r.TL+r.TR+r.BR+r.BL > 0 {
@@ -272,12 +335,19 @@ func htmlNode(body, css *strings.Builder, n Node, ctr *int, indent int) {
 		content = html.EscapeString(n.Text.Content)
 	}
 	if n.Type == NodeLine {
-		w := 1.0
-		col := "#ffffff"
-		if n.Stroke != nil {
-			w, col = n.Stroke.Width, n.Stroke.Color
+		if n.Arrow {
+			content = polySVG(n)
+		} else {
+			w := 1.0
+			col := "#ffffff"
+			if n.Stroke != nil {
+				w, col = n.Stroke.Width, n.Stroke.Color
+			}
+			style = append(style, "border:none", fmt.Sprintf("border-top:%spx solid %s", num(w), col))
 		}
-		style = append(style, "border:none", fmt.Sprintf("border-top:%spx solid %s", num(w), col))
+	}
+	if n.Type == NodePoly {
+		content = polySVG(n)
 	}
 	if n.Type == NodeIcon && n.Icon != nil && strings.Contains(n.Icon.SVG, "<svg") {
 		col := n.Icon.Color

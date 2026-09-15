@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ColorVariable, Document, Node, Scene, Tool } from './types'
-import { uid, clone, slug, downloadBlob, clamp, round1 } from './utils'
+import type { ColorVariable, Document, LineVariant, Node, OvalVariant, RectVariant, Scene, SceneFormat, Tool } from './types'
+import { uid, clone, slug, downloadBlob, clamp, round1, makeNode, defaultCornerRadii } from './utils'
 import { exportSceneHTML, exportScenePNG, exportSceneSVG, getDocument, saveDocument } from './api'
 import { sceneToReact } from './exporters'
 import { resolveNodes, sceneDuration, sceneLoops, syncTree } from './anim'
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceBetween, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceBetween, FlipHorizontal2, FlipVertical2 } from 'lucide-react'
 import { TopBar } from './components/TopBar'
 import { LeftPanel } from './components/LeftPanel'
 import { RightPanel } from './components/RightPanel'
 import { CanvasView, findAny } from './components/CanvasView'
-import { ExportModal, type SceneFormat } from './components/ExportModal'
 import { PreviewOverlay } from './components/PreviewOverlay'
 import { ShareSheet } from './components/ShareSheet'
 import { createSession, useCollab, type Session } from './collab'
@@ -33,10 +33,16 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
   const [loading, setLoading] = useState(!initialDoc && !join)
   const [selectionIds, setSelectionIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
+  const [rectVar, setRectVar] = useState<RectVariant>('rect')
+  const [lineVar, setLineVar] = useState<LineVariant>('line')
+  const [ovalVar, setOvalVar] = useState<OvalVariant>('ellipse')
+  const [stamp, setStamp] = useState<{ svg: string; color: string; name: string } | null>(null)
+  const [leftTab, setLeftTab] = useState<'layers' | 'icons'>('layers')
+  const [rightTab, setRightTab] = useState<'design' | 'export'>('design')
+  const [lockAspect, setLockAspect] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, panX: 0, panY: 0 })
   const [toasts, setToasts] = useState<ToastItem[]>([])
-  const [exportOpen, setExportOpen] = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [playing, setPlaying] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
@@ -514,29 +520,25 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
     [doc],
   )
 
-  // ---- icon + frame insertion ----
+  // ---- icon stamp, drawn shapes, alignment ----
 
-  const insertIcon = useCallback(
-    (icon: IconDef) => {
-      const el = document.querySelector('.canvas-wrap') as HTMLElement | null
+  const pickIcon = useCallback((icon: IconDef) => {
+    setStamp({ svg: icon.svg, color: '#ffffff', name: icon.name })
+  }, [])
+
+  const placeStamp = useCallback(
+    (wx: number, wy: number) => {
+      if (!stamp) return
       const size = 32
-      // centre of the visible canvas, in scene coordinates
-      let wx = scene.width / 2 - size / 2
-      let wy = scene.height / 2 - size / 2
-      if (el) {
-        const { width: vw, height: vh } = el.getBoundingClientRect()
-        wx = (vw / 2 - viewport.panX) / viewport.zoom - size / 2
-        wy = (vh / 2 - viewport.panY) / viewport.zoom - size / 2
-      }
       const n: Node = {
         id: uid(),
-        name: icon.name
+        name: stamp.name
           .split('-')
-          .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
           .join(' '),
         type: 'icon',
-        x: round1(wx),
-        y: round1(wy),
+        x: round1(wx - size / 2),
+        y: round1(wy - size / 2),
         width: size,
         height: size,
         rotation: 0,
@@ -545,48 +547,158 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
         locked: false,
         fill: null,
         stroke: null,
-        icon: { svg: icon.svg, color: '#ffffff' },
+        icon: { svg: stamp.svg, color: stamp.color },
         effects: [],
       }
       addNode(n)
       setSelectionIds([n.id])
+      setStamp(null)
     },
-    [addNode, scene.width, scene.height, viewport],
+    [stamp, addNode],
   )
 
-  const insertFrame = useCallback(
-    (w: number, h: number, label: string) => {
-      const el = document.querySelector('.canvas-wrap') as HTMLElement | null
-      let wx = 64
-      let wy = 64
-      if (el) {
-        const { width: vw, height: vh } = el.getBoundingClientRect()
-        wx = (vw / 2 - viewport.panX) / viewport.zoom - w / 2
-        wy = (vh / 2 - viewport.panY) / viewport.zoom - h / 2
+  const variantName = (label: string): string => {
+    let max = 0
+    const re = new RegExp(`^${label} (\\d+)$`)
+    const walk = (list: Node[]) => {
+      for (const n of list) {
+        const m = re.exec(n.name)
+        if (m) max = Math.max(max, Number(m[1]))
+        if (n.children) walk(n.children)
       }
-      const n: Node = {
-        id: uid(),
-        name: label,
-        type: 'frame',
-        x: round1(wx),
-        y: round1(wy),
-        width: w,
-        height: h,
-        rotation: 0,
-        opacity: 1,
-        visible: true,
-        locked: false,
-        fill: '#1d1d1d',
-        stroke: null,
-        cornerRadius: 0,
-        children: [],
-        effects: [],
+    }
+    walk(scene.nodes)
+    return `${label} ${max + 1}`
+  }
+
+  /** CanvasView reports the drawn box; the editor applies shape variants. */
+  const createDrawn = useCallback(
+    (kind: 'rect' | 'ellipse' | 'line', x0: number, y0: number, x1: number, y1: number) => {
+      let n: Node
+      if (kind === 'line') {
+        n = makeNode('line', 0, 0, 1, 1)
+        let dx = x1 - x0
+        let dy = y1 - y0
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+          dx = 120
+          dy = 0
+          x1 = x0 + dx
+          y1 = y0 + dy
+        }
+        n.x = Math.min(x0, x1)
+        n.y = Math.min(y0, y1)
+        n.width = Math.abs(x1 - x0)
+        n.height = Math.abs(y1 - y0)
+        n.flip = (x1 - x0) * (y1 - y0) < 0
+        if (lineVar === 'arrow') n.name = variantName('Arrow')
+      } else if (kind === 'rect') {
+        n = makeNode('rect', Math.min(x0, x1), Math.min(y0, y1), Math.max(1, Math.abs(x1 - x0)), Math.max(1, Math.abs(y1 - y0)))
+        if (rectVar === 'rounded') {
+          n.cornerRadius = 12
+          n.cornerRadii = defaultCornerRadii(12)
+          n.name = variantName('Rounded rectangle')
+        }
+      } else if (ovalVar === 'ellipse') {
+        n = makeNode('ellipse', Math.min(x0, x1), Math.min(y0, y1), Math.max(1, Math.abs(x1 - x0)), Math.max(1, Math.abs(y1 - y0)))
+      } else {
+        n = makeNode('poly', Math.min(x0, x1), Math.min(y0, y1), Math.max(1, Math.abs(x1 - x0)), Math.max(1, Math.abs(y1 - y0)))
+        n.poly = { kind: ovalVar === 'polygon' ? 'polygon' : ovalVar, sides: ovalVar === 'polygon' ? 6 : undefined }
+        n.name = variantName(ovalVar === 'triangle' ? 'Triangle' : ovalVar === 'polygon' ? 'Polygon' : 'Star')
       }
       addNode(n)
       setSelectionIds([n.id])
     },
-    [addNode, viewport],
+    [addNode, lineVar, rectVar, ovalVar, scene.nodes],
   )
+
+  const selNodes = useCallback(
+    (nodes: Node[]) => selectionIds.map((id) => findAny(nodes, id)).filter((n): n is Node => !!n && !n.locked),
+    [selectionIds],
+  )
+
+  const alignSelection = useCallback(
+    (mode: 'left' | 'centerH' | 'right' | 'top' | 'midV' | 'bottom') => {
+      mutateScene(currentSceneId, (sc) => {
+        const ns = selNodes(sc.nodes)
+        if (ns.length === 0) return
+        let bx0 = 0, by0 = 0, bx1 = sc.width, by1 = sc.height
+        if (ns.length > 1) {
+          bx0 = Math.min(...ns.map((n) => n.x))
+          by0 = Math.min(...ns.map((n) => n.y))
+          bx1 = Math.max(...ns.map((n) => n.x + n.width))
+          by1 = Math.max(...ns.map((n) => n.y + n.height))
+        }
+        for (const n of ns) {
+          if (mode === 'left') n.x = round1(bx0)
+          if (mode === 'right') n.x = round1(bx1 - n.width)
+          if (mode === 'centerH') n.x = round1(bx0 + (bx1 - bx0 - n.width) / 2)
+          if (mode === 'top') n.y = round1(by0)
+          if (mode === 'bottom') n.y = round1(by1 - n.height)
+          if (mode === 'midV') n.y = round1(by0 + (by1 - by0 - n.height) / 2)
+        }
+      }, true)
+    },
+    [mutateScene, currentSceneId, selNodes],
+  )
+
+  const distributeSelection = useCallback(
+    (mode: 'h' | 'v') => {
+      mutateScene(currentSceneId, (sc) => {
+        const ns = selNodes(sc.nodes)
+        if (ns.length < 3) return
+        const sorted = [...ns].sort((a, b) => (mode === 'h' ? a.x - b.x : a.y - b.y))
+        const first = sorted[0]
+        const last = sorted[sorted.length - 1]
+        const span = mode === 'h' ? last.x + last.width - first.x : last.y + last.height - first.y
+        const item = sorted.reduce((acc, n) => acc + (mode === 'h' ? n.width : n.height), 0)
+        const gap = (span - item) / (sorted.length - 1)
+        let cursor = mode === 'h' ? first.x + first.width : first.y + first.height
+        for (let i = 1; i < sorted.length - 1; i++) {
+          const n = sorted[i]
+          if (mode === 'h') n.x = round1(cursor + gap)
+          else n.y = round1(cursor + gap)
+          cursor = (mode === 'h' ? n.x + n.width : n.y + n.height)
+        }
+      }, true)
+    },
+    [mutateScene, currentSceneId, selNodes],
+  )
+
+  const flipSelection = useCallback(
+    (mode: 'h' | 'v') => {
+      mutateScene(currentSceneId, (sc) => {
+        const ns = selNodes(sc.nodes)
+        if (ns.length === 0) return
+        if (ns.length === 1 && ns[0].type === 'line') {
+          ns[0].flip = !ns[0].flip
+          return
+        }
+        const bx0 = ns.length > 1 ? Math.min(...ns.map((n) => n.x)) : 0
+        const by0 = ns.length > 1 ? Math.min(...ns.map((n) => n.y)) : 0
+        const bx1 = ns.length > 1 ? Math.max(...ns.map((n) => n.x + n.width)) : sc.width
+        const by1 = ns.length > 1 ? Math.max(...ns.map((n) => n.y + n.height)) : sc.height
+        for (const n of ns) {
+          if (mode === 'h') n.x = round1(bx1 - (n.x - bx0) - n.width)
+          else n.y = round1(by1 - (n.y - by0) - n.height)
+        }
+      }, true)
+    },
+    [mutateScene, currentSceneId, selNodes],
+  )
+
+  const zoomBy = useCallback((factor: number) => {
+    const el = document.querySelector('.canvas-wrap') as HTMLElement | null
+    if (!el) return
+    const { width: vw, height: vh } = el.getBoundingClientRect()
+    const cx = vw / 2
+    const cy = vh / 2
+    setViewport((vp) => {
+      const zoom = clamp(vp.zoom * factor, 0.05, 4)
+      const wx = (cx - vp.panX) / vp.zoom
+      const wy = (cy - vp.panY) / vp.zoom
+      return { zoom, panX: cx - wx * zoom, panY: cy - wy * zoom }
+    })
+  }, [])
 
   // ---- export / import ----
   const exportShear = useCallback(() => {
@@ -601,7 +713,6 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
       if (!s) throw new Error('scene not found')
       if (format === 'shear') {
         exportShear()
-        setExportOpen(false)
         return
       }
       if (format === 'react') {
@@ -611,7 +722,6 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
           format === 'png' ? await exportScenePNG(s, 2) : format === 'svg' ? await exportSceneSVG(s) : await exportSceneHTML(s)
         downloadBlob(blob, `${slug(s.name)}.${format}`)
       }
-      setExportOpen(false)
       toast(`${format === 'react' ? 'React component' : format.toUpperCase()} exported`)
     },
     [toast, exportShear],
@@ -685,7 +795,7 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
         if (playing) setPlaying(false)
         else if (shareOpen) setShareOpen(false)
         else if (editingId) closeTextEdit()
-        else if (exportOpen) setExportOpen(false)
+        else if (stamp) setStamp(null)
         else setSelectionIds([])
         return
       }
@@ -709,7 +819,7 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
       }
       if (meta && (e.key === 'e' || e.key === 'E')) {
         e.preventDefault()
-        setExportOpen(true)
+        setRightTab('export')
         return
       }
       if (meta && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
@@ -727,6 +837,14 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
         fit()
         return
       }
+      if (e.altKey && e.key === '1') {
+        setLeftTab('layers')
+        return
+      }
+      if (e.altKey && e.key === '2') {
+        setLeftTab('icons')
+        return
+      }
       if (!meta) {
         switch (e.key.toLowerCase()) {
           case 'v':
@@ -735,20 +853,24 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
           case 'h':
             setTool('hand')
             return
-          case 'f':
-            setTool('frame')
-            return
           case 'r':
+            if (tool === 'rect') setRectVar((v) => (v === 'rect' ? 'rounded' : 'rect'))
             setTool('rect')
             return
-          case 'o':
-            setTool('ellipse')
-            return
           case 'l':
+            if (tool === 'line') setLineVar((v) => (v === 'line' ? 'arrow' : 'line'))
             setTool('line')
+            return
+          case 'o':
+            if (tool === 'ellipse')
+              setOvalVar((v) => (v === 'ellipse' ? 'triangle' : v === 'triangle' ? 'polygon' : v === 'polygon' ? 'star' : 'ellipse'))
+            setTool('ellipse')
             return
           case 't':
             setTool('text')
+            return
+          case 'x':
+            setLeftTab('icons')
             return
         }
       }
@@ -780,7 +902,7 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingId, exportOpen, playing, shareOpen, selectionIds, undo, redo, duplicateNode, deleteSelection, mutateScene, currentSceneId, closeTextEdit])
+  }, [editingId, playing, shareOpen, stamp, tool, selectionIds, undo, redo, duplicateNode, deleteSelection, mutateScene, currentSceneId, closeTextEdit])
 
   // canvas node mutation: live (unrecorded) writes mark the gesture as touched
   const canvasMutate = useCallback(
@@ -847,6 +969,21 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
     })
   }, [])
 
+  const selBBox = useMemo(() => {
+    if (selectionIds.length === 0) return null
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (const id of selectionIds) {
+      const n = findAny(scene.nodes, id)
+      if (!n) continue
+      x0 = Math.min(x0, n.x)
+      y0 = Math.min(y0, n.y)
+      x1 = Math.max(x1, n.x + n.width)
+      y1 = Math.max(y1, n.y + n.height)
+    }
+    if (x0 === Infinity) return null
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+  }, [selectionIds, scene])
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center bg-ink-800">
@@ -862,24 +999,45 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
         onRename={(name) => apply((d) => (d.name = name))}
         savedAt={savedAt}
         tool={tool}
+        rectVar={rectVar}
+        lineVar={lineVar}
+        ovalVar={ovalVar}
         onTool={setTool}
-        onInsertFrame={insertFrame}
+        onCycleRect={() => {
+          if (tool === 'rect') setRectVar((v) => (v === 'rect' ? 'rounded' : 'rect'))
+          setTool('rect')
+        }}
+        onCycleLine={() => {
+          if (tool === 'line') setLineVar((v) => (v === 'line' ? 'arrow' : 'line'))
+          setTool('line')
+        }}
+        onCycleOval={() => {
+          if (tool === 'ellipse')
+            setOvalVar((v) => (v === 'ellipse' ? 'triangle' : v === 'triangle' ? 'polygon' : v === 'polygon' ? 'star' : 'ellipse'))
+          setTool('ellipse')
+        }}
         onUndo={undo}
         onRedo={redo}
         canUndo={past.current.length > 0 && historyTick >= 0}
         canRedo={future.current.length > 0 && historyTick >= 0}
         onImport={importJSON}
-        onExport={() => setExportOpen(true)}
         onPlay={() => setPlaying(true)}
         onShare={() => setShareOpen(true)}
         onHome={onHome}
         peers={collab.peers}
         self={collab.self}
         live={live}
+        zoom={viewport.zoom}
+        onZoomIn={() => zoomBy(1.2)}
+        onZoomOut={() => zoomBy(1 / 1.2)}
+        onZoomReset={zoomReset}
+        onFit={fit}
       />
 
       <div className="flex min-h-0 flex-1">
         <LeftPanel
+          tab={leftTab}
+          onTab={setLeftTab}
           scene={scene}
           selectedId={selectionId}
           onSelect={(id) => setSelectionIds(id ? [id] : [])}
@@ -899,15 +1057,13 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
           onAddScene={addScene}
           onRenameScene={(id, name) =>
             apply((d) => {
-              const s = d.scenes.find((x) => x.id === id)
-              if (s) s.name = name
+              const sc = d.scenes.find((x) => x.id === id)
+              if (sc) sc.name = name
             })
           }
           onDeleteScene={deleteScene}
-          variables={variables}
-          onVariables={setVariables}
-          variableUsage={variableUsage}
-          onInsertIcon={insertIcon}
+          onPickIcon={pickIcon}
+          stampArmed={!!stamp}
         />
 
         <main className="relative min-w-0 flex-1">
@@ -933,23 +1089,43 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
               onDelete={deleteNode}
               peers={collab.peers}
               onPointer={broadcastPointer}
+              stamp={stamp ? { svg: stamp.svg, color: stamp.color } : null}
+              onPlaceStamp={placeStamp}
+              createDrawn={createDrawn}
+              lockAspect={lockAspect}
             />
           </div>
+          {selBBox && tool === 'select' && !stamp && (
+            <ContextToolbar
+              bbox={selBBox}
+              viewport={viewport}
+              count={selectionIds.length}
+              onAlign={alignSelection}
+              onDistribute={distributeSelection}
+              onFlip={flipSelection}
+            />
+          )}
         </main>
 
         <RightPanel
+          tab={rightTab}
+          onTab={setRightTab}
           node={selectedNode}
           multiCount={selectionIds.length}
           scene={scene}
           variables={variables}
           onCreateVariable={createVariable}
+          onVariables={setVariables}
+          variableUsage={variableUsage}
           onUpdateNode={updateNode}
           onUpdateText={updateText}
           onUpdateScene={updateSceneProps}
-          onDuplicate={duplicateNode}
-          onDelete={deleteNode}
-          onDeleteMany={deleteSelection}
-          onSelect={() => setSelectionIds([])}
+          onFlipH={() => flipSelection('h')}
+          onFlipV={() => flipSelection('v')}
+          lockAspect={lockAspect}
+          onLockAspect={setLockAspect}
+          onExportScene={(fmt) => void doExportScene(currentSceneId, fmt)}
+          onExportShear={exportShear}
           time={time}
           playing={timelinePlaying}
           onTime={setTime}
@@ -957,13 +1133,7 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
         />
       </div>
 
-      <ExportModal
-        open={exportOpen}
-        scenes={doc.scenes}
-        defaultSceneId={currentSceneId}
-        onClose={() => setExportOpen(false)}
-        onExport={doExportScene}
-      />
+
 
       <PreviewOverlay scene={scene} open={playing} onClose={() => setPlaying(false)} />
 
@@ -995,4 +1165,55 @@ function emptyDocument(): Document {
     selectedSceneId: sceneId,
     scenes: [{ id: sceneId, name: 'Scene 1', width: 1440, height: 900, background: '#171717', nodes: [] }],
   }
+}
+
+// ---- Lunacy-style floating context toolbar above the selection ----
+
+function ContextToolbar(props: {
+  bbox: { x: number; y: number; w: number; h: number }
+  viewport: { zoom: number; panX: number; panY: number }
+  count: number
+  onAlign: (m: 'left' | 'centerH' | 'right' | 'top' | 'midV' | 'bottom') => void
+  onDistribute: (m: 'h' | 'v') => void
+  onFlip: (m: 'h' | 'v') => void
+}) {
+  const vp = props.viewport
+  const left = vp.panX + props.bbox.x * vp.zoom + (props.bbox.w * vp.zoom) / 2
+  const top = Math.max(8, vp.panY + props.bbox.y * vp.zoom - 42)
+  return (
+    <div
+      className="absolute z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border border-white/10 bg-ink-900/90 p-1 shadow-panel backdrop-blur-xl"
+      style={{ left, top }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <CtxBtn title="Align left edges" onClick={() => props.onAlign('left')}><AlignStartVertical size={13} strokeWidth={1.8} /></CtxBtn>
+      <CtxBtn title="Align horizontal centers" onClick={() => props.onAlign('centerH')}><AlignCenterVertical size={13} strokeWidth={1.8} /></CtxBtn>
+      <CtxBtn title="Align right edges" onClick={() => props.onAlign('right')}><AlignEndVertical size={13} strokeWidth={1.8} /></CtxBtn>
+      <CtxBtn title="Align top edges" onClick={() => props.onAlign('top')}><AlignStartHorizontal size={13} strokeWidth={1.8} /></CtxBtn>
+      <CtxBtn title="Align vertical centers" onClick={() => props.onAlign('midV')}><AlignCenterHorizontal size={13} strokeWidth={1.8} /></CtxBtn>
+      <CtxBtn title="Align bottom edges" onClick={() => props.onAlign('bottom')}><AlignEndHorizontal size={13} strokeWidth={1.8} /></CtxBtn>
+      {props.count > 2 && (
+        <>
+          <span className="mx-0.5 h-4 w-px bg-white/10" />
+          <CtxBtn title="Distribute horizontally" onClick={() => props.onDistribute('h')}><AlignHorizontalSpaceBetween size={13} strokeWidth={1.8} /></CtxBtn>
+          <CtxBtn title="Distribute vertically" onClick={() => props.onDistribute('v')}><AlignVerticalSpaceBetween size={13} strokeWidth={1.8} /></CtxBtn>
+        </>
+      )}
+      <span className="mx-0.5 h-4 w-px bg-white/10" />
+      <CtxBtn title="Flip horizontal" onClick={() => props.onFlip('h')}><FlipHorizontal2 size={13} strokeWidth={1.8} /></CtxBtn>
+      <CtxBtn title="Flip vertical" onClick={() => props.onFlip('v')}><FlipVertical2 size={13} strokeWidth={1.8} /></CtxBtn>
+    </div>
+  )
+}
+
+function CtxBtn({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title: string }) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100"
+    >
+      {children}
+    </button>
+  )
 }

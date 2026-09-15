@@ -17,6 +17,7 @@ const (
 	NodeRect    NodeType = "rect"
 	NodeEllipse NodeType = "ellipse"
 	NodeLine    NodeType = "line"
+	NodePoly    NodeType = "poly"
 	NodeText    NodeType = "text"
 	NodeIcon    NodeType = "icon"
 )
@@ -144,6 +145,12 @@ type TextData struct {
 
 // Node is a single element on a scene. Frames own children; every node
 // lives in its parent's coordinate space.
+// Poly describes a regular shape inscribed in the node box.
+type Poly struct {
+	Kind  string `json:"kind"`             // triangle | polygon | star
+	Sides int    `json:"sides,omitempty"` // polygon side count
+}
+
 type Node struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
@@ -169,6 +176,10 @@ type Node struct {
 	Timeline     *Timeline    `json:"timeline,omitempty"`
 	// Flip is line-only: true draws top-right to bottom-left.
 	Flip bool `json:"flip,omitempty"`
+	// Arrow is line-only: draws an arrow head at the end point.
+	Arrow bool `json:"arrow,omitempty"`
+	// Poly is poly-only: regular shape outline (triangle / polygon / star).
+	Poly *Poly `json:"poly,omitempty"`
 	// Text is text-only.
 	Text *TextData `json:"text,omitempty"`
 	// Icon is icon-only: library glyph markup plus its tint.
@@ -296,7 +307,7 @@ func validateNodes(nodes []Node, depth int) error {
 	for i := range nodes {
 		n := &nodes[i]
 		switch n.Type {
-		case NodeFrame, NodeRect, NodeEllipse, NodeLine, NodeText, NodeIcon:
+		case NodeFrame, NodeRect, NodeEllipse, NodeLine, NodePoly, NodeText, NodeIcon:
 		default:
 			return errors.New("unknown node type: " + string(n.Type))
 		}

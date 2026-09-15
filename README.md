@@ -16,12 +16,18 @@ dark, neutral, and nothing stays trapped in the editor.
 - **Start page** — your recent designs as live thumbnails, one click to
   open, duplicate or delete, one button (or tile) to start a new one,
   `.shear` import lives here too
-- Scenes (artboards) with their own size and background
-- Frames (with phone/tablet/desktop **presets**), rectangles, ellipses,
-  lines, multi-line text and **icons**
+- Lunacy-style layout: menu bar + centred tool toolbar, vertical content
+  tabs on the left (Layers / Icons), Design + Export tabs on the right,
+  floating align/distribute/flip toolbar over the selection
+- Pages (scenes) with their own size and background — no frames, the
+  canvas is the workspace
+- Shape tools like Lunacy's: rectangle (R, again = rounded), line
+  (L, again = arrow), oval (O cycles oval → triangle → polygon → star),
+  multi-line text and **icons**
 - **Icon library** — 2,495 glyphs from Lucide + Heroicons, searchable
-  in the left panel; an icon lands on the canvas as a tintable vector
-  object that scales without blur
+  in the left panel; click one and it rides your cursor, click the
+  canvas to place it (Esc cancels); icons are tintable vectors that
+  scale without blur
 - **Color variables** — a document palette; bind any fill, stroke, text
   colour or scene background to a variable and every reference updates
   when the variable changes (managed in the Colors tab, pickable from
@@ -143,7 +149,7 @@ web/                    React editor (Vite + Tailwind + Framer Motion)
     "nodes": [{
       "id": "…",
       "name": "Rectangle 1",
-      "type": "frame | rect | ellipse | line | text | icon",
+      "type": "frame | rect | ellipse | line | poly | text | icon",  // frame = legacy invisible group
       "x": 0, "y": 0, "width": 100, "height": 100,
       "rotation": 0,          // degrees
       "opacity": 1,           // 0..1 (absent → 1)
@@ -193,7 +199,10 @@ web/                    React editor (Vite + Tailwind + Framer Motion)
 
 | Key            | Action                        |
 | -------------- | ----------------------------- |
-| `V / H / F / R / O / L / T` | Select / Hand / Frame / Rect / Ellipse / Line / Text |
+| `V / H / R / O / L / T / X` | Select / Hand / Rect / Oval-cycler / Line / Text / Icons |
+| `R, R` / `L, L` | rounded rectangle / arrow |
+| `O, O …` | triangle → polygon → star → oval |
+| `Alt+1 / Alt+2` | Layers tab / Icons tab |
 | Drag empty canvas | Marquee-select (⇧ adds)    |
 | `⌫` / `Delete` | Delete selection              |
 | `⌘Z` / `⇧⌘Z`   | Undo / redo                   |

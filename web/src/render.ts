@@ -1,5 +1,6 @@
 import type { CornerRadii, Node, Scene } from './types'
 import { adjustCSS } from './anim'
+import { arrowHead, lineEnds, polyPoints } from './utils'
 
 export interface Viewport {
   zoom: number
@@ -95,11 +96,21 @@ function drawText(ctx: CanvasRenderingContext2D, n: Node) {
   }
 }
 
+function polyPath(ctx: CanvasRenderingContext2D, n: Node) {
+  const pts = polyPoints(n)
+  ctx.beginPath()
+  ctx.moveTo(pts[0][0], pts[0][1])
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1])
+  ctx.closePath()
+}
+
 function drawGeometry(ctx: CanvasRenderingContext2D, n: Node, shadow = false) {
   const r = radii(n)
   switch (n.type) {
-    case 'rect':
-    case 'frame': {
+    case 'frame':
+      // legacy frames are invisible containers — only their children draw
+      break
+    case 'rect': {
       if (n.fill) {
         roundedPath(ctx, 0, 0, n.width, n.height, r)
         ctx.fillStyle = n.fill
@@ -131,18 +142,46 @@ function drawGeometry(ctx: CanvasRenderingContext2D, n: Node, shadow = false) {
     case 'line': {
       const w = n.stroke?.width ?? 2
       const color = n.stroke?.color ?? '#ffffff'
+      const [x1, y1, x2, y2] = lineEnds(n)
       ctx.beginPath()
-      if (n.flip) {
-        ctx.moveTo(n.width, 0)
-        ctx.lineTo(0, n.height)
+      ctx.moveTo(x1, y1)
+      if (n.arrow) {
+        // stop the shaft where the head begins
+        const ang = Math.atan2(y2 - y1, x2 - x1)
+        const len = Math.max(10, w * 4) * 0.7
+        ctx.lineTo(x2 - Math.cos(ang) * len, y2 - Math.sin(ang) * len)
       } else {
-        ctx.moveTo(0, 0)
-        ctx.lineTo(n.width, n.height)
+        ctx.lineTo(x2, y2)
       }
       ctx.strokeStyle = color
       ctx.lineWidth = w
       ctx.lineCap = 'round'
       ctx.stroke()
+      if (n.arrow) {
+        const head = arrowHead(n)
+        ctx.beginPath()
+        ctx.moveTo(head[0][0], head[0][1])
+        ctx.lineTo(head[1][0], head[1][1])
+        ctx.lineTo(head[2][0], head[2][1])
+        ctx.closePath()
+        ctx.fillStyle = color
+        ctx.fill()
+      }
+      break
+    }
+    case 'poly': {
+      if (n.fill) {
+        polyPath(ctx, n)
+        ctx.fillStyle = n.fill
+        ctx.fill()
+      }
+      if (!shadow && n.stroke && n.stroke.width > 0) {
+        polyPath(ctx, n)
+        ctx.strokeStyle = n.stroke.color
+        ctx.lineWidth = n.stroke.width
+        ctx.lineJoin = 'round'
+        ctx.stroke()
+      }
       break
     }
     case 'text':
@@ -187,8 +226,9 @@ export function drawNode(ctx: CanvasRenderingContext2D, n: Node) {
     if (e.type === 'inner-shadow') {
       // A fast canvas approximation: clip to the object and cast the shadow from
       // an oversized surrounding shape back into it.
-      if (n.type === 'rect' || n.type === 'frame') roundedPath(ctx, 0, 0, n.width, n.height, r)
+      if (n.type === 'rect') roundedPath(ctx, 0, 0, n.width, n.height, r)
       else if (n.type === 'ellipse') { ctx.beginPath(); ctx.ellipse(n.width / 2, n.height / 2, n.width / 2, n.height / 2, 0, 0, Math.PI * 2) }
+      else if (n.type === 'poly') polyPath(ctx, n)
       ctx.clip()
     }
     if (e.spread) {
@@ -220,23 +260,6 @@ export function drawScene(ctx: CanvasRenderingContext2D, scene: Scene) {
   ctx.shadowOffsetY = 4
   ctx.fillStyle = scene.background
   ctx.fillRect(0, 0, scene.width, scene.height)
-  ctx.restore()
-
-  // Figma-like artboard grid inside the scene: fine 10px divisions and bolder 100px divisions.
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(0, 0, scene.width, scene.height)
-  ctx.clip()
-  for (let x = 0; x <= scene.width; x += 10) {
-    ctx.strokeStyle = x % 100 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.035)'
-    ctx.lineWidth = x % 100 === 0 ? 1 : 0.5
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, scene.height); ctx.stroke()
-  }
-  for (let y = 0; y <= scene.height; y += 10) {
-    ctx.strokeStyle = y % 100 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.035)'
-    ctx.lineWidth = y % 100 === 0 ? 1 : 0.5
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(scene.width, y); ctx.stroke()
-  }
   ctx.restore()
 
   for (const n of scene.nodes) drawNode(ctx, n)

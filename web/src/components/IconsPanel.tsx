@@ -16,7 +16,7 @@ const PAGE = 360
  * searchable, one click drops the icon onto the canvas as a tintable
  * vector object.
  */
-export function IconsPanel({ onInsert }: { onInsert: (icon: IconDef) => void }) {
+export function IconsPanel({ onInsert, armed }: { onInsert: (icon: IconDef) => void; armed?: boolean }) {
   const [query, setQuery] = useState('')
   const [set, setSet] = useState<string>('all')
   const [limit, setLimit] = useState(PAGE)
@@ -93,6 +93,11 @@ export function IconsPanel({ onInsert }: { onInsert: (icon: IconDef) => void }) 
         ))}
       </div>
 
+      {armed && (
+        <div className="border-t border-white/5 bg-white/5 px-2.5 py-1.5 text-center text-[10px] text-neutral-300">
+          Icon on your cursor — click the canvas to place it · Esc cancels
+        </div>
+      )}
       <div className="border-t border-white/5 px-2.5 py-1.5 text-center">
         {results.length > limit ? (
           <button

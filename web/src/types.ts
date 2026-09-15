@@ -1,6 +1,10 @@
-export type NodeType = 'frame' | 'rect' | 'ellipse' | 'line' | 'text' | 'icon'
+export type NodeType = 'frame' | 'rect' | 'ellipse' | 'line' | 'poly' | 'text' | 'icon'
 export type TextAlign = 'left' | 'center' | 'right'
-export type Tool = 'select' | 'hand' | 'frame' | 'rect' | 'ellipse' | 'line' | 'text'
+export type Tool = 'select' | 'hand' | 'rect' | 'ellipse' | 'line' | 'text' | 'icon'
+/** Lunacy shape variants offered by the cycle-shortcut tools (R / L / O). */
+export type RectVariant = 'rect' | 'rounded'
+export type LineVariant = 'line' | 'arrow'
+export type OvalVariant = 'ellipse' | 'triangle' | 'polygon' | 'star'
 
 export interface Stroke {
   color: string
@@ -136,6 +140,8 @@ export interface Node {
   adjust?: Adjust
   timeline?: Timeline
   flip?: boolean // line only; true draws the opposite diagonal (/ instead of \)
+  arrow?: boolean // line only; draws an arrow head at the end point
+  poly?: { kind: 'triangle' | 'polygon' | 'star'; sides?: number } // poly only
   text?: TextData // text only
   icon?: IconData // icon only
   children?: Node[] // frame only
@@ -214,6 +220,10 @@ export const NODE_TYPE_LABEL: Record<NodeType, string> = {
   rect: 'Rectangle',
   ellipse: 'Ellipse',
   line: 'Line',
+  poly: 'Shape',
   text: 'Text',
   icon: 'Icon',
 }
+
+/** Export formats offered by the right-panel Export tab. */
+export type SceneFormat = 'png' | 'svg' | 'html' | 'react' | 'shear'

@@ -266,6 +266,110 @@ func strokeEllipse(img *image.RGBA, cx, cy, a, b, sw float64, col color.RGBA) {
 	})
 }
 
+// polyPoints mirrors the frontend geometry: regular shape inscribed in the
+// node box, offset by (ox, oy).
+func polyPoints(n Node, ox, oy float64) [][2]float64 {
+	kind := "triangle"
+	sides := 0
+	if n.Poly != nil {
+		kind = n.Poly.Kind
+		sides = n.Poly.Sides
+	}
+	cx, cy := ox+n.Width/2, oy+n.Height/2
+	rx, ry := n.Width/2, n.Height/2
+	var pts [][2]float64
+	if kind == "star" {
+		spikes := sides
+		if spikes < 3 {
+			spikes = 5
+		}
+		for i := 0; i < spikes*2; i++ {
+			r := 1.0
+			if i%2 == 1 {
+				r = 0.45
+			}
+			a := math.Pi*float64(i)/float64(spikes) - math.Pi/2
+			pts = append(pts, [2]float64{cx + math.Cos(a)*r*rx, cy + math.Sin(a)*r*ry})
+		}
+	} else {
+		ns := sides
+		if kind == "triangle" {
+			ns = 3
+		} else if ns < 3 {
+			ns = 6
+		}
+		for i := 0; i < ns; i++ {
+			a := 2*math.Pi*float64(i)/float64(ns) - math.Pi/2
+			pts = append(pts, [2]float64{cx + math.Cos(a)*rx, cy + math.Sin(a)*ry})
+		}
+	}
+	return pts
+}
+
+func polyCoverage(px, py float64, pts [][2]float64) float64 {
+	inside := false
+	minD := math.Inf(1)
+	for i, j := 0, len(pts)-1; i < len(pts); j, i = i, i+1 {
+		ax, ay := pts[i][0], pts[i][1]
+		bx, by := pts[j][0], pts[j][1]
+		if (ay > py) != (by > py) {
+			x := ax + (py-ay)*(bx-ax)/(by-ay)
+			if px < x {
+				inside = !inside
+			}
+		}
+		if d := segDistance(px, py, ax, ay, bx, by); d < minD {
+			minD = d
+		}
+	}
+	d := minD
+	if inside {
+		d = -minD
+	}
+	return clamp01(0.5 - d)
+}
+
+func polyBounds(pts [][2]float64) (x0, y0, x1, y1 float64) {
+	x0, y0 = math.Inf(1), math.Inf(1)
+	x1, y1 = math.Inf(-1), math.Inf(-1)
+	for _, p := range pts {
+		x0, y0 = math.Min(x0, p[0]), math.Min(y0, p[1])
+		x1, y1 = math.Max(x1, p[0]), math.Max(y1, p[1])
+	}
+	return
+}
+
+func drawPoly(img *image.RGBA, pts [][2]float64, col color.RGBA) {
+	x0, y0, x1, y1 := polyBounds(pts)
+	paintBounds(img, x0-1, y0-1, x1+1, y1+1, func(x, y int) {
+		blendOver(img, x, y, col, polyCoverage(float64(x)+0.5, float64(y)+0.5, pts))
+	})
+}
+
+func strokePoly(img *image.RGBA, pts [][2]float64, sw float64, col color.RGBA) {
+	for i, j := 0, len(pts)-1; i < len(pts); j, i = i, i+1 {
+		drawLine(img, pts[j][0], pts[j][1], pts[i][0], pts[i][1], sw, col)
+	}
+}
+
+// arrowHeadPts mirrors the frontend arrow head triangle.
+func arrowHeadPts(n Node, ox, oy float64) [][2]float64 {
+	x0, y0, x1, y1 := ox, oy, ox+n.Width, oy+n.Height
+	if n.Flip {
+		x0, x1 = x1, x0
+	}
+	ang := math.Atan2(y1-y0, x1-x0)
+	sw := 2.0
+	if n.Stroke != nil && n.Stroke.Width > 0 {
+		sw = n.Stroke.Width
+	}
+	len := math.Max(10, sw*4)
+	bx, by := x1-math.Cos(ang)*len, y1-math.Sin(ang)*len
+	px, py := math.Cos(ang+math.Pi/2), math.Sin(ang+math.Pi/2)
+	w2 := len * 0.45
+	return [][2]float64{{x1, y1}, {bx + px*w2, by + py*w2}, {bx - px*w2, by - py*w2}}
+}
+
 func drawLine(img *image.RGBA, ax, ay, bx, by, sw float64, col color.RGBA) {
 	r := sw / 2
 	x0, y0 := math.Min(ax, bx)-r-1, math.Min(ay, by)-r-1
@@ -419,6 +523,14 @@ func nodeCanvas(n Node) (*image.RGBA, float64) {
 			sw = 2
 		}
 		drawLine(img, x0, y0, x1, y1, sw, col)
+	case NodePoly:
+		pts := polyPoints(n, pad, pad)
+		if hasFill {
+			drawPoly(img, pts, fillCol)
+		}
+		if hasStroke {
+			strokePoly(img, pts, n.Stroke.Width, strokeCol)
+		}
 	case NodeText:
 		drawText(img, n, pad)
 		clipToBox(img, pad, n.Width, n.Height)

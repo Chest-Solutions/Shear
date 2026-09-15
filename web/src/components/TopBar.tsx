@@ -1,23 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { useRef } from 'react'
 import {
-  ChevronDown,
+  ArrowUpRight,
   Circle,
-  Download,
   Hand,
+  Hexagon,
+  Maximize2,
   Minus,
   MousePointer2,
   Play,
+  Plus,
   Redo2,
+  Share2,
   Square,
+  Star,
+  Triangle,
   Type,
   Undo2,
   Upload,
-  Users,
-  Box,
+  Sparkles,
 } from 'lucide-react'
-import type { Peer, Tool } from '../types'
-import { PeerAvatars } from './Presence'
+import type { LineVariant, OvalVariant, Peer, RectVariant, Tool } from '../types'
 import { Logo } from './Logo'
 
 interface Props {
@@ -25,224 +27,221 @@ interface Props {
   onRename: (name: string) => void
   savedAt: string | null
   tool: Tool
+  rectVar: RectVariant
+  lineVar: LineVariant
+  ovalVar: OvalVariant
   onTool: (t: Tool) => void
-  onInsertFrame: (w: number, h: number, label: string) => void
+  onCycleRect: () => void
+  onCycleLine: () => void
+  onCycleOval: () => void
   onUndo: () => void
   onRedo: () => void
   canUndo: boolean
   canRedo: boolean
-  onImport: (file: File) => void
-  onExport: () => void
+  onImport: (f: File) => void
   onPlay: () => void
   onShare: () => void
   onHome: () => void
   peers: Peer[]
   self: Peer | null
   live: boolean
+  zoom: number
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onZoomReset: () => void
+  onFit: () => void
 }
 
-const EASE = [0.25, 0.1, 0.25, 1] as const
-
-const TOOLS: { id: Tool; icon: React.ReactNode; label: string; key: string }[] = [
-  { id: 'select', icon: <MousePointer2 size={15} strokeWidth={1.8} />, label: 'Select', key: 'V' },
-  { id: 'hand', icon: <Hand size={15} strokeWidth={1.8} />, label: 'Hand', key: 'H' },
-  { id: 'frame', icon: <Box size={15} strokeWidth={1.8} />, label: 'Frame', key: 'F' },
-  { id: 'rect', icon: <Square size={15} strokeWidth={1.8} />, label: 'Rectangle', key: 'R' },
-  { id: 'ellipse', icon: <Circle size={15} strokeWidth={1.8} />, label: 'Ellipse', key: 'O' },
-  { id: 'line', icon: <Minus size={15} strokeWidth={1.8} />, label: 'Line', key: 'L' },
-  { id: 'text', icon: <Type size={15} strokeWidth={1.8} />, label: 'Text', key: 'T' },
-]
-
-/** Frame presets, the same device sizes Lunacy offers out of the box. */
-const FRAME_PRESETS: { label: string; w: number; h: number }[] = [
-  { label: 'iPhone 15 Pro · 393×852', w: 393, h: 852 },
-  { label: 'Android · 360×800', w: 360, h: 800 },
-  { label: 'Tablet · 768×1024', w: 768, h: 1024 },
-  { label: 'Laptop · 1280×800', w: 1280, h: 800 },
-  { label: 'Desktop · 1440×900', w: 1440, h: 900 },
-  { label: 'Full HD · 1920×1080', w: 1920, h: 1080 },
-]
-
-export function TopBar(props: Props) {
+/**
+ * Lunacy layout: a menu bar (home button, document tab, presence, play,
+ * zoom control) above a centred toolbar with the design tools.
+ */
+export function TopBar(p: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
-  const [framesOpen, setFramesOpen] = useState(false)
-  const framesRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!framesOpen) return
-    const onDown = (e: MouseEvent) => {
-      if (framesRef.current && !framesRef.current.contains(e.target as Node)) setFramesOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setFramesOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [framesOpen])
-
   return (
-    <header className="relative z-30 flex h-11 shrink-0 items-center gap-2 border-b border-white/5 bg-ink-925 px-3">
-      {/* left: mark + document */}
-      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+    <header className="shrink-0 border-b border-white/5 bg-ink-850">
+      {/* menu bar */}
+      <div className="flex h-11 items-center gap-2 px-3">
         <button
-          onClick={props.onHome}
-          title="Back to your designs"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-200 transition-colors hover:bg-white/10"
+          onClick={p.onHome}
+          title="Home — recent designs"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
         >
-          <Logo size={15} />
+          <Logo size={16} />
         </button>
-        <input
-          value={props.docName}
-          onChange={(e) => props.onRename(e.target.value)}
-          spellCheck={false}
-          aria-label="Document name"
-          className="w-40 min-w-0 truncate rounded-md bg-transparent px-2 py-1 text-[12px] text-neutral-300 outline-none transition-colors hover:bg-white/5 focus:bg-white/5 focus:text-neutral-100"
-        />
-        {props.savedAt && (
-          <span className="hidden text-[11px] text-neutral-600 lg:inline" title={props.savedAt}>
-            saved
-          </span>
-        )}
-        {props.live && <PeerAvatars peers={props.peers} self={props.self} />}
-      </div>
+        <div className="flex h-7 min-w-0 items-center gap-2 rounded-md bg-white/5 px-2.5">
+          <input
+            value={p.docName}
+            onChange={(e) => p.onRename(e.target.value)}
+            spellCheck={false}
+            className="w-32 truncate bg-transparent text-[12px] font-medium text-neutral-100 outline-none"
+          />
+          {p.savedAt && <span className="hidden text-[10px] text-neutral-600 sm:block">Saved {p.savedAt}</span>}
+        </div>
 
-      {/* centre: the tool strip */}
-      <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-white/5 bg-ink-800 p-0.5">
-        {TOOLS.map((t) => {
-          const active = props.tool === t.id
-          return (
-            <div key={t.id} className="relative flex items-center">
-              <motion.button
-                title={`${t.label}  (${t.key})`}
-                whileTap={{ scale: 0.92 }}
-                onClick={() => props.onTool(t.id)}
-                className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-                  active ? 'text-neutral-900' : 'text-neutral-400 hover:bg-white/10 hover:text-neutral-100'
-                }`}
+        <div className="flex-1" />
+
+        {/* presence */}
+        {p.live && (
+          <div className="flex items-center -space-x-1">
+            {[p.self, ...p.peers].filter(Boolean).map((peer, i) => (
+              <span
+                key={i}
+                title={peer!.name}
+                className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-ink-850 text-[10px] font-semibold text-neutral-900"
+                style={{ background: peer!.color }}
               >
-                {active && (
-                  <motion.span
-                    layoutId="tool-active"
-                    transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                    className="absolute inset-0 rounded-md bg-white"
-                  />
-                )}
-                <span className="relative">{t.icon}</span>
-              </motion.button>
-              {t.id === 'frame' && (
-                <div ref={framesRef} className="relative">
-                  <button
-                    title="Frame presets"
-                    onClick={() => setFramesOpen((v) => !v)}
-                    className={`flex h-7 w-3.5 items-center justify-center rounded-r-md transition-colors hover:bg-white/10 ${
-                      active ? 'text-neutral-600' : 'text-neutral-500'
-                    }`}
-                  >
-                    <ChevronDown size={10} strokeWidth={2.5} />
-                  </button>
-                  <AnimatePresence>
-                    {framesOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        transition={{ duration: 0.16, ease: EASE }}
-                        className="absolute left-1/2 top-8 z-40 w-52 -translate-x-1/2 overflow-hidden rounded-lg border border-white/10 bg-ink-925/95 p-1 shadow-panel backdrop-blur-xl"
-                      >
-                        {FRAME_PRESETS.map((f) => (
-                          <button
-                            key={f.label}
-                            onClick={() => {
-                              setFramesOpen(false)
-                              props.onTool('select')
-                              props.onInsertFrame(f.w, f.h, f.label.split(' ·')[0])
-                            }}
-                            className="block w-full rounded-md px-2.5 py-1.5 text-left text-[11.5px] text-neutral-300 transition-colors hover:bg-white/10 hover:text-neutral-100"
-                          >
-                            {f.label}
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      {/* right: history + actions */}
-      <div className="flex flex-1 items-center justify-end gap-0.5">
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".shear,.json,application/json"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (f) props.onImport(f)
-            e.target.value = ''
-          }}
-        />
+                {peer!.name.charAt(0).toUpperCase()}
+              </span>
+            ))}
+          </div>
+        )}
 
         <button
-          onClick={props.onUndo}
-          disabled={!props.canUndo}
-          title="Undo (⌘Z)"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100 disabled:opacity-30 disabled:hover:bg-transparent"
-        >
-          <Undo2 size={13} strokeWidth={1.8} />
-        </button>
-        <button
-          onClick={props.onRedo}
-          disabled={!props.canRedo}
-          title="Redo (⇧⌘Z)"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100 disabled:opacity-30 disabled:hover:bg-transparent"
-        >
-          <Redo2 size={13} strokeWidth={1.8} />
-        </button>
-
-        <div className="mx-1 h-4 w-px bg-white/10" />
-
-        <button
-          onClick={props.onPlay}
-          title="Preview (⇧⌘P)"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100"
-        >
-          <Play size={13} strokeWidth={1.8} />
-        </button>
-
-        <button
-          onClick={props.onShare}
-          title="Work together"
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/10 hover:text-neutral-100 ${
-            props.live ? 'text-neutral-100' : 'text-neutral-400'
+          onClick={p.onShare}
+          title="Work together — share a live session"
+          className={`flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12px] transition-colors ${
+            p.live ? 'bg-white text-neutral-900' : 'bg-white/10 text-neutral-200 hover:bg-white/15'
           }`}
         >
-          <Users size={13} strokeWidth={1.8} />
+          <Share2 size={12} strokeWidth={2} />
+          {p.live ? 'Live' : 'Share'}
+        </button>
+        <button
+          onClick={p.onPlay}
+          title="Preview (⇧⌘P)"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
+        >
+          <Play size={13} strokeWidth={2} />
         </button>
 
-        <button
-          onClick={() => fileRef.current?.click()}
-          title="Open .shear file"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100"
-        >
-          <Upload size={13} strokeWidth={1.8} />
-        </button>
+        {/* zoom control */}
+        <div className="flex items-center gap-0.5 rounded-md border border-white/5 bg-white/5 p-0.5">
+          <BarBtn title="Zoom out" onClick={p.onZoomOut}>
+            <Minus size={12} strokeWidth={2} />
+          </BarBtn>
+          <button
+            onClick={p.onZoomReset}
+            title="Reset to 100% (⌘0)"
+            className="w-11 rounded py-0.5 text-center text-[11px] tabular-nums text-neutral-300 transition-colors hover:bg-white/10 hover:text-neutral-100"
+          >
+            {Math.round(p.zoom * 100)}%
+          </button>
+          <BarBtn title="Zoom in" onClick={p.onZoomIn}>
+            <Plus size={12} strokeWidth={2} />
+          </BarBtn>
+          <BarBtn title="Fit page (⌘1)" onClick={p.onFit}>
+            <Maximize2 size={12} strokeWidth={2} />
+          </BarBtn>
+        </div>
+      </div>
 
-        <button
-          onClick={props.onExport}
-          className="ml-1.5 flex h-7 items-center gap-1.5 rounded-md bg-white px-3 text-[12px] font-medium text-neutral-900 transition-colors hover:bg-neutral-200"
+      {/* toolbar */}
+      <div className="relative flex h-10 items-center justify-center gap-0.5 border-t border-white/5">
+        <div className="absolute left-3 flex items-center gap-0.5">
+          <BarBtn title="Undo (⌘Z)" onClick={p.onUndo} disabled={!p.canUndo}>
+            <Undo2 size={13} strokeWidth={2} />
+          </BarBtn>
+          <BarBtn title="Redo (⇧⌘Z)" onClick={p.onRedo} disabled={!p.canRedo}>
+            <Redo2 size={13} strokeWidth={2} />
+          </BarBtn>
+          <BarBtn title="Import .shear / .json" onClick={() => fileRef.current?.click()}>
+            <Upload size={13} strokeWidth={2} />
+          </BarBtn>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".json,.shear,application/json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) p.onImport(f)
+              e.target.value = ''
+            }}
+          />
+        </div>
+
+        <ToolBtn active={p.tool === 'select'} title="Select — V" onClick={() => p.onTool('select')}>
+          <MousePointer2 size={14} strokeWidth={1.8} />
+        </ToolBtn>
+        <ToolBtn
+          active={p.tool === 'rect'}
+          title={p.rectVar === 'rounded' ? 'Rounded rectangle — R (press again to switch)' : 'Rectangle — R (press again for rounded)'}
+          onClick={p.onCycleRect}
         >
-          <Download size={12} strokeWidth={2.2} />
-          Export
-        </button>
+          {p.rectVar === 'rounded' ? <RoundedRectIcon /> : <Square size={14} strokeWidth={1.8} />}
+        </ToolBtn>
+        <ToolBtn
+          active={p.tool === 'line'}
+          title={p.lineVar === 'arrow' ? 'Arrow — L (press again to switch)' : 'Line — L (press again for arrow)'}
+          onClick={p.onCycleLine}
+        >
+          {p.lineVar === 'arrow' ? <ArrowUpRight size={14} strokeWidth={1.8} /> : <Minus size={14} strokeWidth={1.8} />}
+        </ToolBtn>
+        <ToolBtn
+          active={p.tool === 'ellipse'}
+          title={`${ovalLabel(p.ovalVar)} — O (press again to cycle)`}
+          onClick={p.onCycleOval}
+        >
+          {p.ovalVar === 'ellipse' ? (
+            <Circle size={14} strokeWidth={1.8} />
+          ) : p.ovalVar === 'triangle' ? (
+            <Triangle size={14} strokeWidth={1.8} />
+          ) : p.ovalVar === 'polygon' ? (
+            <Hexagon size={14} strokeWidth={1.8} />
+          ) : (
+            <Star size={14} strokeWidth={1.8} />
+          )}
+        </ToolBtn>
+        <ToolBtn active={p.tool === 'text'} title="Text — T" onClick={() => p.onTool('text')}>
+          <Type size={14} strokeWidth={1.8} />
+        </ToolBtn>
+        <ToolBtn active={p.tool === 'icon'} title="Icon — X (opens the library, click an icon to arm it)" onClick={() => p.onTool('icon')}>
+          <Sparkles size={14} strokeWidth={1.8} />
+        </ToolBtn>
+        <ToolBtn active={p.tool === 'hand'} title="Hand — H or Space" onClick={() => p.onTool('hand')}>
+          <Hand size={14} strokeWidth={1.8} />
+        </ToolBtn>
       </div>
     </header>
+  )
+}
+
+function ovalLabel(v: OvalVariant): string {
+  return v === 'ellipse' ? 'Oval' : v === 'triangle' ? 'Triangle' : v === 'polygon' ? 'Polygon' : 'Star'
+}
+
+function RoundedRectIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="3" y="5" width="18" height="14" rx="5" />
+    </svg>
+  )
+}
+
+function BarBtn({ children, onClick, title, disabled }: { children: React.ReactNode; onClick: () => void; title: string; disabled?: boolean }) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100 disabled:opacity-30 disabled:hover:bg-transparent"
+    >
+      {children}
+    </button>
+  )
+}
+
+function ToolBtn({ children, onClick, title, active }: { children: React.ReactNode; onClick: () => void; title: string; active?: boolean }) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+        active ? 'bg-white/15 text-white' : 'text-neutral-400 hover:bg-white/10 hover:text-neutral-100'
+      }`}
+    >
+      {children}
+    </button>
   )
 }

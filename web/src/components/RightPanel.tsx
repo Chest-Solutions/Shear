@@ -1,40 +1,72 @@
-import { AlignCenter, AlignLeft, AlignRight, Copy, Trash2, X } from 'lucide-react'
-import type { ColorVariable, Effect, Node, Scene, TextAlign } from '../types'
+import { useState } from 'react'
+import { AlignCenter, AlignLeft, AlignRight, FlipHorizontal2, FlipVertical2, LockKeyhole, Unlock, X } from 'lucide-react'
+import type { ColorVariable, Effect, Node, Scene, SceneFormat, TextAlign } from '../types'
 import { NODE_TYPE_LABEL } from '../types'
 import { defaultCornerRadii, uid } from '../utils'
 import { TimelinePanel, Slider } from './Timeline'
 import { ColorField } from './ColorField'
+import { ColorsPanel } from './ColorsPanel'
 
 interface Props {
+  tab: 'design' | 'export'
+  onTab: (t: 'design' | 'export') => void
   node: Node | null
-  /** total selected when more than one (shows a summary instead) */
   multiCount: number
   scene: Scene
   variables: ColorVariable[]
   onCreateVariable: (v: ColorVariable) => void
+  onVariables: (next: ColorVariable[]) => void
+  variableUsage: (id: string) => number
   onUpdateNode: (id: string, patch: Partial<Node>) => void
   onUpdateText: (id: string, patch: Partial<NonNullable<Node['text']>>) => void
   onUpdateScene: (patch: Partial<Scene>) => void
-  onDuplicate: (id: string) => void
-  onDelete: (id: string) => void
-  onDeleteMany: () => void
-  onSelect: () => void
+  onFlipH: () => void
+  onFlipV: () => void
+  lockAspect: boolean
+  onLockAspect: (v: boolean) => void
+  onExportScene: (fmt: SceneFormat) => void
+  onExportShear: () => void
   time: number
   playing: boolean
   onTime: (t: number) => void
   onPlaying: (v: boolean) => void
 }
 
+/**
+ * Lunacy right panel: Design / Export tabs. The Design tab mirrors
+ * Lunacy's section order — position & size (with flip + aspect lock),
+ * rotation & corners, opacity, fills, borders, effects — and with
+ * nothing selected it shows workspace color, nudge amounts and the
+ * document color palette.
+ */
 export function RightPanel(props: Props) {
   return (
-    <aside className="flex w-72 min-w-64 max-w-[520px] shrink-0 resize-x flex-col overflow-auto border-l border-white/5 bg-ink-850">
-      {props.multiCount > 1 ? (
-        <MultiProps {...props} />
-      ) : props.node ? (
-        <NodeProps {...props} node={props.node} />
-      ) : (
-        <SceneProps {...props} scene={props.scene} />
-      )}
+    <aside className="flex w-72 min-w-64 max-w-[520px] shrink-0 resize-x flex-col border-l border-white/5 bg-ink-850">
+      <div className="flex shrink-0 border-b border-white/5">
+        {(['design', 'export'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => props.onTab(t)}
+            className={`relative flex-1 py-2 text-[11px] font-medium uppercase tracking-[0.12em] transition-colors ${
+              props.tab === t ? 'text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            {t}
+            {props.tab === t && <span className="absolute inset-x-6 bottom-0 h-0.5 rounded-full bg-white" />}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {props.tab === 'export' ? (
+          <ExportTab {...props} />
+        ) : props.multiCount > 1 ? (
+          <MultiProps {...props} />
+        ) : props.node ? (
+          <NodeProps {...props} node={props.node} />
+        ) : (
+          <SceneProps {...props} scene={props.scene} />
+        )}
+      </div>
     </aside>
   )
 }
@@ -51,23 +83,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function MultiProps(props: Props) {
   return (
     <>
-      <div className="flex items-center gap-2 border-b border-white/5 px-3 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">Selection</div>
-          <div className="mt-0.5 text-[13px] font-medium text-neutral-100">{props.multiCount} layers</div>
-        </div>
-        <button
-          title="Delete selection (⌫)"
-          onClick={() => props.onDeleteMany()}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-white/10 hover:text-neutral-100"
-        >
-          <Trash2 size={13} strokeWidth={1.8} />
-        </button>
+      <div className="border-b border-white/5 px-3 py-3">
+        <div className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">Selection</div>
+        <div className="mt-0.5 text-[13px] font-medium text-neutral-100">{props.multiCount} layers</div>
       </div>
       <div className="px-3 py-3">
         <p className="text-[11px] leading-relaxed text-neutral-600">
-          Drag to move everything together. Arrow keys nudge the whole group. Select a single layer to edit its
-          properties.
+          Align, distribute and flip from the floating toolbar above the selection. Drag to move everything
+          together; arrow keys nudge the whole group.
         </p>
       </div>
     </>
@@ -76,64 +99,73 @@ function MultiProps(props: Props) {
 
 function NodeProps(props: Props & { node: Node }) {
   const n = props.node
+  const hasFill = n.type === 'rect' || n.type === 'ellipse' || n.type === 'poly'
   return (
     <>
-      <div className="flex items-center gap-2 border-b border-white/5 px-3 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">{NODE_TYPE_LABEL[n.type]}</div>
-          <input
-            value={n.name}
-            onChange={(e) => props.onUpdateNode(n.id, { name: e.target.value })}
-            spellCheck={false}
-            className="mt-0.5 w-full truncate bg-transparent text-[13px] font-medium text-neutral-100 outline-none"
-          />
-        </div>
-        <button
-          title="Duplicate (⌘D)"
-          onClick={() => props.onDuplicate(n.id)}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-white/10 hover:text-neutral-100"
-        >
-          <Copy size={13} strokeWidth={1.8} />
-        </button>
-        <button
-          title="Delete (⌫)"
-          onClick={() => props.onDelete(n.id)}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-white/10 hover:text-neutral-100"
-        >
-          <Trash2 size={13} strokeWidth={1.8} />
-        </button>
+      <div className="border-b border-white/5 px-3 py-3">
+        <div className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">{NODE_TYPE_LABEL[n.type]}</div>
+        <input
+          value={n.name}
+          onChange={(e) => props.onUpdateNode(n.id, { name: e.target.value })}
+          spellCheck={false}
+          className="mt-0.5 w-full truncate bg-transparent text-[13px] font-medium text-neutral-100 outline-none"
+        />
       </div>
 
-      <Section title="Transform">
+      {/* size & position, flip, aspect lock — like Lunacy */}
+      <Section title="Position & size">
         <div className="grid grid-cols-2 gap-1.5">
           <NumField label="X" value={n.x} onChange={(v) => props.onUpdateNode(n.id, { x: v })} />
           <NumField label="Y" value={n.y} onChange={(v) => props.onUpdateNode(n.id, { y: v })} />
           <NumField label="W" value={n.width} min={1} onChange={(v) => props.onUpdateNode(n.id, { width: v })} />
           <NumField label="H" value={n.height} min={1} onChange={(v) => props.onUpdateNode(n.id, { height: v })} />
         </div>
+        <div className="flex items-center gap-1">
+          <FlipBtn title="Flip horizontal" onClick={props.onFlipH}>
+            <FlipHorizontal2 size={13} strokeWidth={1.8} />
+          </FlipBtn>
+          <FlipBtn title="Flip vertical" onClick={props.onFlipV}>
+            <FlipVertical2 size={13} strokeWidth={1.8} />
+          </FlipBtn>
+          <FlipBtn title={props.lockAspect ? 'Unlock aspect ratio' : 'Lock aspect ratio'} onClick={() => props.onLockAspect(!props.lockAspect)} active={props.lockAspect}>
+            {props.lockAspect ? <LockKeyhole size={13} strokeWidth={1.8} /> : <Unlock size={13} strokeWidth={1.8} />}
+          </FlipBtn>
+        </div>
+      </Section>
+
+      <Section title="Rotation & corners">
         <div className="grid grid-cols-2 gap-1.5">
           <NumField label="Rot" value={n.rotation} suffix="°" onChange={(v) => props.onUpdateNode(n.id, { rotation: v })} />
         </div>
-        <Slider label="Opacity" value={Math.round(n.opacity * 100)} min={0} max={100} suffix="%" onChange={(v) => props.onUpdateNode(n.id, { opacity: v / 100 })} />
+        {n.type === 'rect' && <CornerControls node={n} onUpdate={(patch) => props.onUpdateNode(n.id, patch)} />}
+      </Section>
+
+      <Section title="Opacity">
+        <Slider
+          label="Opacity"
+          value={Math.round(n.opacity * 100)}
+          min={0}
+          max={100}
+          suffix="%"
+          onChange={(v) => props.onUpdateNode(n.id, { opacity: v / 100 })}
+        />
       </Section>
 
       {n.type === 'icon' && n.icon && (
-        <Section title="Icon">
+        <Section title="Fill">
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-neutral-500">Tint</span>
             <ColorField
               value={n.icon.color}
               variables={props.variables}
-              onChange={(c) => props.onUpdateNode(n.id, { icon: { ...n.icon!, color: c } })}
+              onCreateVariable={props.onCreateVariable}
+              onChange={(c, varId) => props.onUpdateNode(n.id, { icon: { ...n.icon!, color: c }, fillVar: varId })}
             />
           </div>
-          <p className="text-[10px] leading-relaxed text-neutral-600">
-            Vector glyph from the built-in library — scales without blur, exports to SVG, HTML and React.
-          </p>
         </Section>
       )}
 
-      {(n.type === 'rect' || n.type === 'frame' || n.type === 'ellipse' || n.type === 'line') && (
+      {hasFill && (
         <Section title="Fill">
           <div className="flex items-center gap-2">
             <Toggle on={n.fill !== null} onToggle={() => props.onUpdateNode(n.id, { fill: n.fill === null ? '#ffffff' : null, fillVar: n.fill === null ? undefined : undefined })} />
@@ -158,7 +190,7 @@ function NodeProps(props: Props & { node: Node }) {
         </Section>
       )}
 
-      <Section title="Stroke">
+      <Section title="Border">
         <div className="flex items-center gap-2">
           <Toggle on={n.stroke !== null} onToggle={() => props.onUpdateNode(n.id, { stroke: n.stroke ? null : { color: '#ffffff', width: 1 }, strokeVar: undefined })} />
           <ColorField
@@ -182,23 +214,6 @@ function NodeProps(props: Props & { node: Node }) {
             </div>
           )}
         </div>
-      </Section>
-
-      {(n.type === 'rect' || n.type === 'frame') && (
-        <Section title="Corners">
-          <CornerControls node={n} onUpdate={(patch) => props.onUpdateNode(n.id, patch)} />
-        </Section>
-      )}
-
-      <Section title="Timeline">
-        <TimelinePanel
-          node={n}
-          time={props.time}
-          playing={props.playing}
-          onTime={props.onTime}
-          onPlay={props.onPlaying}
-          onUpdate={(patch) => props.onUpdateNode(n.id, patch)}
-        />
       </Section>
 
       <Section title="Effects">
@@ -258,36 +273,44 @@ function NodeProps(props: Props & { node: Node }) {
           </div>
         </Section>
       )}
+
+      <Section title="Timeline">
+        <TimelinePanel
+          node={n}
+          time={props.time}
+          playing={props.playing}
+          onTime={props.onTime}
+          onPlay={props.onPlaying}
+          onUpdate={(patch) => props.onUpdateNode(n.id, patch)}
+        />
+      </Section>
     </>
   )
 }
 
 function SceneProps(props: Props & { scene: Scene }) {
   const s = props.scene
+  const [nudgeSmall, setNudgeSmall] = useState(1)
+  const [nudgeBig, setNudgeBig] = useState(10)
   return (
     <>
       <div className="border-b border-white/5 px-3 py-3">
-        <div className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">Scene</div>
+        <div className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">Page</div>
         <input
           value={s.name}
           onChange={(e) => props.onUpdateScene({ name: e.target.value })}
           spellCheck={false}
           className="mt-0.5 w-full bg-transparent text-[13px] font-medium text-neutral-100 outline-none"
         />
-        <button
-          onClick={props.onSelect}
-          className="mt-1 text-[11px] text-neutral-600 transition-colors hover:text-neutral-400"
-        >
-          Select a layer to edit it
-        </button>
       </div>
-      <Section title="Canvas">
+
+      <Section title="Workspace">
         <div className="grid grid-cols-2 gap-1.5">
           <NumField label="W" value={s.width} min={50} step={10} onChange={(v) => props.onUpdateScene({ width: v })} />
           <NumField label="H" value={s.height} min={50} step={10} onChange={(v) => props.onUpdateScene({ height: v })} />
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-neutral-500">Background</span>
+          <span className="text-[11px] text-neutral-500">Color</span>
           <ColorField
             value={s.background}
             variableId={s.backgroundVar}
@@ -296,8 +319,78 @@ function SceneProps(props: Props & { scene: Scene }) {
             onChange={(c, varId) => props.onUpdateScene({ background: c, backgroundVar: varId })}
           />
         </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <NumField label="Nudge" value={nudgeSmall} min={1} onChange={setNudgeSmall} />
+          <NumField label="Big ⇧" value={nudgeBig} min={1} onChange={setNudgeBig} />
+        </div>
+      </Section>
+
+      <ColorsPanel variables={props.variables} onChange={props.onVariables} usage={props.variableUsage} />
+    </>
+  )
+}
+
+const FORMATS: { id: SceneFormat; label: string; hint: string }[] = [
+  { id: 'png', label: 'PNG', hint: '2× raster, rendered by the server' },
+  { id: 'svg', label: 'SVG', hint: 'vectors, shadows, filters, icons' },
+  { id: 'html', label: 'HTML', hint: 'self-contained page, animations run' },
+  { id: 'react', label: 'React', hint: 'dependency-free .tsx component' },
+]
+
+function ExportTab(props: Props) {
+  const [fmt, setFmt] = useState<SceneFormat>('png')
+  return (
+    <>
+      <Section title="Export scene">
+        <div className="space-y-1">
+          {FORMATS.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFmt(f.id)}
+              className={`flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors ${
+                fmt === f.id ? 'border-white/30 bg-white/10' : 'border-white/5 bg-white/[0.03] hover:bg-white/5'
+              }`}
+            >
+              <span className={`h-2 w-2 rounded-full ${fmt === f.id ? 'bg-white' : 'bg-neutral-600'}`} />
+              <span className="text-[12px] font-medium text-neutral-200">{f.label}</span>
+              <span className="ml-auto text-[10px] text-neutral-600">{f.hint}</span>
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => props.onExportScene(fmt)}
+          className="w-full rounded-md bg-white py-1.5 text-[12px] font-semibold text-neutral-900 transition-colors hover:bg-neutral-200"
+        >
+          Export {FORMATS.find((f) => f.id === fmt)?.label} (⌘E)
+        </button>
+      </Section>
+      <Section title="Document">
+        <button
+          onClick={props.onExportShear}
+          className="w-full rounded-md bg-white/10 py-1.5 text-[12px] font-medium text-neutral-200 transition-colors hover:bg-white/15"
+        >
+          Save .shear file
+        </button>
+        <p className="text-[10px] leading-relaxed text-neutral-600">
+          The whole document — pages, styles, variables and animations. Hand it to another designer or re-import
+          it from the toolbar.
+        </p>
       </Section>
     </>
+  )
+}
+
+function FlipBtn({ children, onClick, title, active }: { children: React.ReactNode; onClick: () => void; title: string; active?: boolean }) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+        active ? 'bg-white text-neutral-900' : 'text-neutral-400 hover:bg-white/10 hover:text-neutral-100'
+      }`}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -347,12 +440,27 @@ function CornerControls({ node, onUpdate }: { node: Node; onUpdate: (patch: Part
     const next = { ...r, [k]: v, linked: false }
     onUpdate({ cornerRadius: Math.max(next.tl, next.tr, next.br, next.bl), cornerRadii: next })
   }
-  return <div className="space-y-2"><div className="flex items-center justify-between"><span className="text-[11px] text-neutral-500">Linked corners</span><Toggle on={r.linked} onToggle={() => onUpdate({ cornerRadii: { ...r, linked: !r.linked } })} /></div><Slider label="All" value={r.linked ? r.tl : Math.max(r.tl, r.tr, r.br, r.bl)} min={0} max={max} onChange={setAll} /><div className="grid grid-cols-2 gap-1.5"><NumField label="TL" value={r.tl} min={0} onChange={(v) => setOne('tl', v)} /><NumField label="TR" value={r.tr} min={0} onChange={(v) => setOne('tr', v)} /><NumField label="BR" value={r.br} min={0} onChange={(v) => setOne('br', v)} /><NumField label="BL" value={r.bl} min={0} onChange={(v) => setOne('bl', v)} /></div><p className="text-[10px] leading-relaxed text-neutral-600">Drag the blue corner dots on-canvas. Hold Shift to change only that corner.</p></div>
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-neutral-500">Linked corners</span>
+        <Toggle on={r.linked} onToggle={() => onUpdate({ cornerRadii: { ...r, linked: !r.linked } })} />
+      </div>
+      <Slider label="All" value={r.linked ? r.tl : Math.max(r.tl, r.tr, r.br, r.bl)} min={0} max={max} onChange={setAll} />
+      <div className="grid grid-cols-2 gap-1.5">
+        <NumField label="TL" value={r.tl} min={0} onChange={(v) => setOne('tl', v)} />
+        <NumField label="TR" value={r.tr} min={0} onChange={(v) => setOne('tr', v)} />
+        <NumField label="BR" value={r.br} min={0} onChange={(v) => setOne('br', v)} />
+        <NumField label="BL" value={r.bl} min={0} onChange={(v) => setOne('bl', v)} />
+      </div>
+      <p className="text-[10px] leading-relaxed text-neutral-600">Drag the corner dots on-canvas. Hold Shift to change only that corner.</p>
+    </div>
+  )
 }
 
 function EffectsControls({ node, onUpdate, variables }: { node: Node; onUpdate: (patch: Partial<Node>) => void; variables: ColorVariable[] }) {
   const effects = node.effects ?? []
-  const update = (id: string, patch: Partial<Effect>) => onUpdate({ effects: effects.map((e) => e.id === id ? { ...e, ...patch } as Effect : e) })
+  const update = (id: string, patch: Partial<Effect>) => onUpdate({ effects: effects.map((e) => (e.id === id ? ({ ...e, ...patch } as Effect) : e)) })
   const remove = (id: string) => onUpdate({ effects: effects.filter((e) => e.id !== id) })
   const addShadow = () => onUpdate({ effects: [...effects, { id: uid(), type: 'drop-shadow', visible: true, color: '#000000', x: 0, y: 8, blur: 24, spread: 0 }] })
   const addBlur = () => onUpdate({ effects: [...effects, { id: uid(), type: 'layer-blur', visible: true, blur: 4 }] })
@@ -379,7 +487,9 @@ function EffectsControls({ node, onUpdate, variables }: { node: Node; onUpdate: 
               <option value="layer-blur">Layer blur</option>
               <option value="background-blur">Background blur</option>
             </select>
-            <button onClick={() => remove(e.id)} className="text-neutral-600 hover:text-neutral-200"><X size={12} /></button>
+            <button onClick={() => remove(e.id)} className="text-neutral-600 hover:text-neutral-200">
+              <X size={12} />
+            </button>
           </div>
           {'color' in e ? (
             <div className="flex items-center gap-2">

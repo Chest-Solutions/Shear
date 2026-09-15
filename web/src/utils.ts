@@ -68,6 +68,56 @@ export function flatten(nodes: Node[]): Node[] {
   return out
 }
 
+export function ptsAttr(pts: [number, number][], ox = 0, oy = 0): string {
+  return pts.map(([x, y]) => `${round1(ox + x)},${round1(oy + y)}`).join(' ')
+}
+
+/** Regular-shape outline inscribed in the node box (local coordinates). */
+export function polyPoints(n: Node): [number, number][] {
+  const w = n.width
+  const h = n.height
+  const kind = n.poly?.kind ?? 'triangle'
+  const cx = w / 2
+  const cy = h / 2
+  const pts: [number, number][] = []
+  if (kind === 'star') {
+    const spikes = Math.max(3, n.poly?.sides ?? 5)
+    for (let i = 0; i < spikes * 2; i++) {
+      const r = i % 2 === 0 ? 1 : 0.45
+      const a = (Math.PI * i) / spikes - Math.PI / 2
+      pts.push([cx + Math.cos(a) * r * cx, cy + Math.sin(a) * r * cy])
+    }
+  } else {
+    const sides = kind === 'triangle' ? 3 : Math.max(3, n.poly?.sides ?? 6)
+    for (let i = 0; i < sides; i++) {
+      const a = (2 * Math.PI * i) / sides - Math.PI / 2
+      pts.push([cx + Math.cos(a) * cx, cy + Math.sin(a) * cy])
+    }
+  }
+  return pts
+}
+
+export function lineEnds(n: Node): [number, number, number, number] {
+  return n.flip ? [n.width, 0, 0, n.height] : [0, 0, n.width, n.height]
+}
+
+/** Arrow-head triangle at the line's end point (local coordinates). */
+export function arrowHead(n: Node): [number, number][] {
+  const [x1, y1, x2, y2] = lineEnds(n)
+  const ang = Math.atan2(y2 - y1, x2 - x1)
+  const len = Math.max(10, (n.stroke?.width ?? 2) * 4)
+  const bx = x2 - Math.cos(ang) * len
+  const by = y2 - Math.sin(ang) * len
+  const px = Math.cos(ang + Math.PI / 2)
+  const py = Math.sin(ang + Math.PI / 2)
+  const w2 = len * 0.45
+  return [
+    [x2, y2],
+    [bx + px * w2, by + py * w2],
+    [bx - px * w2, by - py * w2],
+  ]
+}
+
 export function defaultCornerRadii(v = 0): CornerRadii {
   return { tl: v, tr: v, br: v, bl: v, linked: true }
 }
@@ -90,17 +140,15 @@ export function makeNode(type: NodeType, x: number, y: number, w: number, h: num
     effects: [],
   }
   switch (type) {
-    case 'frame':
-      base.fill = '#1d1d1d'
-      base.children = []
-      base.cornerRadius = 0
-      base.cornerRadii = defaultCornerRadii(0)
-      break
     case 'rect':
       base.cornerRadius = 0
       base.cornerRadii = defaultCornerRadii(0)
       break
     case 'ellipse':
+      break
+    case 'poly':
+      base.fill = '#ffffff'
+      base.poly = { kind: 'triangle' }
       break
     case 'line':
       base.fill = null
