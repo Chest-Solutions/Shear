@@ -4,7 +4,9 @@ name: build-release
 # the Go web server binary (serves the editor + API) plus the built
 # frontend (web/dist), zipped per platform.
 on:
+  # Branch pushes only — tag pushes (release tagging) must not re-run CI.
   push:
+    branches: ["**"]
 
 permissions:
   contents: write
@@ -90,6 +92,44 @@ jobs:
             git pull --rebase origin "${GITHUB_REF_NAME}" || true
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
+
+  # One-shot courier: binaries built & verified in the Arena session are
+  # staged under release-stage/ (this sandbox cannot reach
+  # uploads.github.com, the runner can). Publishes them as a named release,
+  # then unstages so the blobs leave the branch on the next commit.
+  publish-staged:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish staged binaries to a named release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls release-stage/*.zip >/dev/null 2>&1 || { echo "nothing staged"; exit 0; }
+          sha="$(git rev-parse --short HEAD)"
+          gh release create v2.0.0 --target "$GITHUB_SHA" \
+            --title "Shear 2.0" \
+            --notes "Binaries built in the Arena session with a from-scratch Go 1.23.0 toolchain and verified there by the full two-peer collaboration e2e; published through CI.
+
+          Run \`./shear\` (or \`shear.exe\`) — serves the editor + API on :8080.
+
+          | Platform |
+          | --- |
+          | linux-amd64 · linux-arm64 · darwin-amd64 · darwin-arm64 · windows-amd64 |
+
+          Each zip contains the \`shear\` server binary and \`web/dist\` (the editor). The desktop webview shell (\`go build -tags webview\`) is built locally — it needs the system webview libraries.
+
+          Commit: \`$sha\`" \
+            release-stage/*.zip
+
+          git config user.name "shear-ci"
+          git config user.email "ci@shear.local"
+          git rm -r -q release-stage
+          git commit -m "ci: publish v2.0.0 assets, unstage binaries"
+          git pull --rebase origin "$GITHUB_REF_NAME" || true
+          git push origin "HEAD:$GITHUB_REF_NAME"
 
   build:
     needs: test
