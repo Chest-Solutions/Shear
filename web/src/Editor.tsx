@@ -5,7 +5,8 @@ import { exportSceneHTML, exportScenePNG, exportSceneSVG, getDocument, saveDocum
 import { sceneToReact } from './exporters'
 import { resolveNodes, sceneDuration, sceneLoops, syncTree } from './anim'
 import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceBetween, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceBetween, FlipHorizontal2, FlipVertical2 } from 'lucide-react'
-import { TopBar } from './components/TopBar'
+import { TopBar, PresencePill } from './components/TopBar'
+import { VerticalToolbar } from './components/VerticalToolbar'
 import { LeftPanel } from './components/LeftPanel'
 import { RightPanel } from './components/RightPanel'
 import { CanvasView, findAny } from './components/CanvasView'
@@ -38,7 +39,8 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
   const [ovalVar, setOvalVar] = useState<OvalVariant>('ellipse')
   const [stamp, setStamp] = useState<{ svg: string; color: string; name: string } | null>(null)
   const [leftTab, setLeftTab] = useState<'layers' | 'icons'>('layers')
-  const [rightTab, setRightTab] = useState<'design' | 'export'>('design')
+  const [rightTab, setRightTab] = useState<'design' | 'export' | 'code'>('design')
+  const [leftOpen, setLeftOpen] = useState(true)
   const [lockAspect, setLockAspect] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, panX: 0, panY: 0 })
@@ -839,10 +841,12 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
       }
       if (e.altKey && e.key === '1') {
         setLeftTab('layers')
+        setLeftOpen(true)
         return
       }
       if (e.altKey && e.key === '2') {
         setLeftTab('icons')
+        setLeftOpen(true)
         return
       }
       if (!meta) {
@@ -984,6 +988,20 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
   }, [selectionIds, scene])
 
+  const cycleRect = useCallback(() => {
+    if (tool === 'rect') setRectVar((v) => (v === 'rect' ? 'rounded' : 'rect'))
+    setTool('rect')
+  }, [tool])
+  const cycleLine = useCallback(() => {
+    if (tool === 'line') setLineVar((v) => (v === 'line' ? 'arrow' : 'line'))
+    setTool('line')
+  }, [tool])
+  const cycleOval = useCallback(() => {
+    if (tool === 'ellipse')
+      setOvalVar((v) => (v === 'ellipse' ? 'triangle' : v === 'triangle' ? 'polygon' : v === 'polygon' ? 'star' : 'ellipse'))
+    setTool('ellipse')
+  }, [tool])
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center bg-ink-800">
@@ -998,35 +1016,13 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
         docName={doc.name}
         onRename={(name) => apply((d) => (d.name = name))}
         savedAt={savedAt}
-        tool={tool}
-        rectVar={rectVar}
-        lineVar={lineVar}
-        ovalVar={ovalVar}
-        onTool={setTool}
-        onCycleRect={() => {
-          if (tool === 'rect') setRectVar((v) => (v === 'rect' ? 'rounded' : 'rect'))
-          setTool('rect')
-        }}
-        onCycleLine={() => {
-          if (tool === 'line') setLineVar((v) => (v === 'line' ? 'arrow' : 'line'))
-          setTool('line')
-        }}
-        onCycleOval={() => {
-          if (tool === 'ellipse')
-            setOvalVar((v) => (v === 'ellipse' ? 'triangle' : v === 'triangle' ? 'polygon' : v === 'polygon' ? 'star' : 'ellipse'))
-          setTool('ellipse')
-        }}
         onUndo={undo}
         onRedo={redo}
         canUndo={past.current.length > 0 && historyTick >= 0}
         canRedo={future.current.length > 0 && historyTick >= 0}
         onImport={importJSON}
         onPlay={() => setPlaying(true)}
-        onShare={() => setShareOpen(true)}
         onHome={onHome}
-        peers={collab.peers}
-        self={collab.self}
-        live={live}
         zoom={viewport.zoom}
         onZoomIn={() => zoomBy(1.2)}
         onZoomOut={() => zoomBy(1 / 1.2)}
@@ -1034,10 +1030,41 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
         onFit={fit}
       />
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
+        <div className="canvas-wrap absolute inset-0">
+          <CanvasView
+            scene={displayScene}
+            tool={tool}
+            selectionIds={selectionIds}
+            editingId={editingId}
+            viewport={viewport}
+            onViewport={setViewport}
+            select={setSelectionIds}
+            mutate={canvasMutate}
+            gestureBegin={gestureBegin}
+            gestureEnd={gestureEnd}
+            addNode={addNode}
+            startTextEdit={startTextEdit}
+            liveTextEdit={liveTextEdit}
+            commitTextEdit={commitTextEdit}
+            onToolDone={() => setTool('select')}
+            onFit={fit}
+            onDuplicate={duplicateNode}
+            onDelete={deleteNode}
+            peers={collab.peers}
+            onPointer={broadcastPointer}
+            stamp={stamp ? { svg: stamp.svg, color: stamp.color } : null}
+            onPlaceStamp={placeStamp}
+            createDrawn={createDrawn}
+            lockAspect={lockAspect}
+          />
+        </div>
+
         <LeftPanel
           tab={leftTab}
           onTab={setLeftTab}
+          open={leftOpen}
+          onOpen={setLeftOpen}
           scene={scene}
           selectedId={selectionId}
           onSelect={(id) => setSelectionIds(id ? [id] : [])}
@@ -1066,46 +1093,32 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
           stampArmed={!!stamp}
         />
 
-        <main className="relative min-w-0 flex-1">
-          <div className="canvas-wrap absolute inset-0">
-            <CanvasView
-              scene={displayScene}
-              tool={tool}
-              selectionIds={selectionIds}
-              editingId={editingId}
-              viewport={viewport}
-              onViewport={setViewport}
-              select={setSelectionIds}
-              mutate={canvasMutate}
-              gestureBegin={gestureBegin}
-              gestureEnd={gestureEnd}
-              addNode={addNode}
-              startTextEdit={startTextEdit}
-              liveTextEdit={liveTextEdit}
-              commitTextEdit={commitTextEdit}
-              onToolDone={() => setTool('select')}
-              onFit={fit}
-              onDuplicate={duplicateNode}
-              onDelete={deleteNode}
-              peers={collab.peers}
-              onPointer={broadcastPointer}
-              stamp={stamp ? { svg: stamp.svg, color: stamp.color } : null}
-              onPlaceStamp={placeStamp}
-              createDrawn={createDrawn}
-              lockAspect={lockAspect}
-            />
-          </div>
-          {selBBox && tool === 'select' && !stamp && (
-            <ContextToolbar
-              bbox={selBBox}
-              viewport={viewport}
-              count={selectionIds.length}
-              onAlign={alignSelection}
-              onDistribute={distributeSelection}
-              onFlip={flipSelection}
-            />
-          )}
-        </main>
+        <VerticalToolbar
+          tool={tool}
+          rectVar={rectVar}
+          lineVar={lineVar}
+          ovalVar={ovalVar}
+          onCycleRect={cycleRect}
+          onCycleLine={cycleLine}
+          onCycleOval={cycleOval}
+          onTool={setTool}
+          left={leftOpen ? 52 + 240 + 12 : 52 + 12}
+        />
+
+        {selBBox && tool === 'select' && !stamp && (
+          <ContextToolbar
+            bbox={selBBox}
+            viewport={viewport}
+            count={selectionIds.length}
+            onAlign={alignSelection}
+            onDistribute={distributeSelection}
+            onFlip={flipSelection}
+          />
+        )}
+
+        <div className="pointer-events-none absolute top-3 z-20" style={{ right: 272 + 12 + 10 }}>
+          <PresencePill peers={collab.peers} self={collab.self} live={live} onShare={() => setShareOpen(true)} />
+        </div>
 
         <RightPanel
           tab={rightTab}
@@ -1132,9 +1145,6 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
           onPlaying={setTimelinePlaying}
         />
       </div>
-
-
-
       <PreviewOverlay scene={scene} open={playing} onClose={() => setPlaying(false)} />
 
       <ShareSheet

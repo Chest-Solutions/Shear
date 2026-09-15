@@ -1,15 +1,16 @@
-import { useState } from 'react'
-import { AlignCenter, AlignLeft, AlignRight, FlipHorizontal2, FlipVertical2, LockKeyhole, Unlock, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { AlignCenter, AlignLeft, AlignRight, Copy, FlipHorizontal2, FlipVertical2, LockKeyhole, Unlock, X } from 'lucide-react'
 import type { ColorVariable, Effect, Node, Scene, SceneFormat, TextAlign } from '../types'
 import { NODE_TYPE_LABEL } from '../types'
 import { defaultCornerRadii, uid } from '../utils'
 import { TimelinePanel, Slider } from './Timeline'
 import { ColorField } from './ColorField'
 import { ColorsPanel } from './ColorsPanel'
+import { sceneToReact } from '../exporters'
 
 interface Props {
-  tab: 'design' | 'export'
-  onTab: (t: 'design' | 'export') => void
+  tab: 'design' | 'export' | 'code'
+  onTab: (t: 'design' | 'export' | 'code') => void
   node: Node | null
   multiCount: number
   scene: Scene
@@ -41,9 +42,9 @@ interface Props {
  */
 export function RightPanel(props: Props) {
   return (
-    <aside className="flex w-72 min-w-64 max-w-[520px] shrink-0 resize-x flex-col border-l border-white/5 bg-ink-850">
+    <aside className="absolute inset-y-3 right-3 z-10 flex w-[272px] flex-col overflow-hidden rounded-xl border border-white/10 bg-ink-900/95 shadow-panel backdrop-blur-xl">
       <div className="flex shrink-0 border-b border-white/5">
-        {(['design', 'export'] as const).map((t) => (
+        {(['design', 'export', 'code'] as const).map((t) => (
           <button
             key={t}
             onClick={() => props.onTab(t)}
@@ -59,6 +60,8 @@ export function RightPanel(props: Props) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {props.tab === 'export' ? (
           <ExportTab {...props} />
+        ) : props.tab === 'code' ? (
+          <CodeTab scene={props.scene} />
         ) : props.multiCount > 1 ? (
           <MultiProps {...props} />
         ) : props.node ? (
@@ -68,6 +71,25 @@ export function RightPanel(props: Props) {
         )}
       </div>
     </aside>
+  )
+}
+
+function CodeTab({ scene }: { scene: Scene }) {
+  const code = useMemo(() => sceneToReact(scene), [scene])
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between px-3 pt-3 pb-2">
+        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">React</span>
+        <button
+          onClick={() => void navigator.clipboard?.writeText(code)}
+          title="Copy code"
+          className="flex h-6 items-center gap-1 rounded-md bg-white/10 px-2 text-[10px] text-neutral-300 transition-colors hover:bg-white/15 hover:text-neutral-100"
+        >
+          <Copy size={10} strokeWidth={2} /> Copy
+        </button>
+      </div>
+      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre px-3 pb-3 font-mono text-[10px] leading-relaxed text-neutral-400">{code}</pre>
+    </div>
   )
 }
 

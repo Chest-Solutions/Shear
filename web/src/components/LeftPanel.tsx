@@ -53,6 +53,8 @@ type Tab = 'layers' | 'icons'
 interface Props {
   tab: Tab
   onTab: (t: Tab) => void
+  open: boolean
+  onOpen: (v: boolean) => void
   scene: Scene
   selectedId: string | null
   onSelect: (id: string | null) => void
@@ -114,19 +116,28 @@ export function LeftPanel(props: Props) {
       </div>
     ))
 
+  const clickTab = (t: Tab) => {
+    if (props.open && props.tab === t) props.onOpen(false)
+    else {
+      props.onTab(t)
+      props.onOpen(true)
+    }
+  }
+
   return (
-    <aside className="flex w-64 shrink-0 border-r border-white/5 bg-ink-850">
-      {/* Lunacy-style vertical content tabs */}
-      <div className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-white/5 py-2">
-        <TabBtn active={props.tab === 'layers'} onClick={() => props.onTab('layers')} title="Layer list (Alt+1)">
-          <Layers size={14} strokeWidth={1.8} />
+    <>
+      {/* icon rail — new-Lunacy style, labels under icons */}
+      <div className="absolute inset-y-0 left-0 z-10 flex w-[52px] flex-col items-center gap-1 border-r border-white/5 bg-ink-850 py-2">
+        <TabBtn active={props.open && props.tab === 'layers'} onClick={() => clickTab('layers')} title="Layer list (Alt+1)" label="Layers">
+          <Layers size={15} strokeWidth={1.8} />
         </TabBtn>
-        <TabBtn active={props.tab === 'icons'} onClick={() => props.onTab('icons')} title="Built-in icons (Alt+2)">
-          <Sparkles size={14} strokeWidth={1.8} />
+        <TabBtn active={props.open && props.tab === 'icons'} onClick={() => clickTab('icons')} title="Built-in icons (Alt+2)" label="Icons">
+          <Sparkles size={15} strokeWidth={1.8} />
         </TabBtn>
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      {props.open && (
+      <div className="absolute inset-y-0 left-[52px] z-10 flex w-60 flex-col border-r border-white/5 bg-ink-850">
         {props.tab === 'icons' ? (
           <div className="min-h-0 flex-1">
             <IconsPanel onInsert={props.onPickIcon} armed={props.stampArmed} />
@@ -198,20 +209,22 @@ export function LeftPanel(props: Props) {
           </>
         )}
       </div>
-    </aside>
+      )}
+    </>
   )
 }
 
-function TabBtn({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
+function TabBtn({ active, onClick, title, label, children }: { active: boolean; onClick: () => void; title: string; label: string; children: React.ReactNode }) {
   return (
     <button
       title={title}
       onClick={onClick}
-      className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
-        active ? 'bg-white/10 text-neutral-100' : 'text-neutral-500 hover:bg-white/5 hover:text-neutral-300'
+      className={`flex h-10 w-11 flex-col items-center justify-center gap-0.5 rounded-lg transition-colors ${
+        active ? 'text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'
       }`}
     >
       {children}
+      <span className={`text-[8px] leading-none ${active ? 'text-neutral-300' : 'text-neutral-600'}`}>{label}</span>
     </button>
   )
 }
