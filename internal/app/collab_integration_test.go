@@ -79,19 +79,23 @@ func (c *sseClient) next(timeout time.Duration) (name, data string, err error) {
 }
 
 // until skips frames until one with the given event name arrives.
-func (c *sseClient) until(event string, timeout time.Duration) string {
+// `match` optionally filters the frame's data (nil accepts any).
+func (c *sseClient) until(event string, timeout time.Duration, match ...func(string) bool) string {
 	c.t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
 		left := time.Until(deadline)
 		if left <= 0 {
-			c.t.Fatalf("never received %q event", event)
+			c.t.Fatalf("never received matching %q event", event)
 		}
 		name, data, err := c.next(left)
 		if err != nil {
 			c.t.Fatalf("reading for %q: %v", event, err)
 		}
-		if name == event {
+		if name != event {
+			continue
+		}
+		if len(match) == 0 || match[0](data) {
 			return data
 		}
 	}
@@ -190,7 +194,9 @@ func TestTwoPeersCollaborate(t *testing.T) {
 	}
 
 	// Bea hears the peer list settle; it must contain exactly one Ana.
-	peersB := bea.until("peers", 5*time.Second)
+	// (The departure broadcast arrives first and legitimately has none —
+	// wait for the frame that carries her return.)
+	peersB := bea.until("peers", 5*time.Second, func(d string) bool { return strings.Contains(d, `"p_ana"`) })
 	if n := strings.Count(peersB, `"p_ana"`); n != 1 {
 		t.Fatalf("after reconnect peer list has %d Ana entries: %s", n, peersB)
 	}
