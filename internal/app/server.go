@@ -93,6 +93,9 @@ func (s *Server) handlePutDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Version = DocumentVersion
 	d.App = "shear"
+	if d.CreatedAt == "" {
+		d.CreatedAt = Now()
+	}
 	d.UpdatedAt = Now()
 	if err := s.Store.Put(d); err != nil {
 		writeErr(w, 400, err.Error())

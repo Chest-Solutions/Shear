@@ -3,7 +3,9 @@ import { AlignCenter, AlignLeft, AlignRight, Copy, FlipHorizontal2, FlipVertical
 import type { ColorVariable, Effect, Node, Scene, SceneFormat, TextAlign } from '../types'
 import { NODE_TYPE_LABEL } from '../types'
 import { defaultCornerRadii, uid } from '../utils'
-import { TimelinePanel, Slider } from './Timeline'
+import { Slider } from './Timeline'
+import { GradientEditor } from './GradientEditor'
+import { highlightTSX } from './CodeHighlight'
 import { ColorField } from './ColorField'
 import { ColorsPanel } from './ColorsPanel'
 import { sceneToReact } from '../exporters'
@@ -27,10 +29,7 @@ interface Props {
   onLockAspect: (v: boolean) => void
   onExportScene: (fmt: SceneFormat) => void
   onExportShear: () => void
-  time: number
-  playing: boolean
-  onTime: (t: number) => void
-  onPlaying: (v: boolean) => void
+  onExportProject: () => void
 }
 
 /**
@@ -88,7 +87,7 @@ function CodeTab({ scene }: { scene: Scene }) {
           <Copy size={10} strokeWidth={2} /> Copy
         </button>
       </div>
-      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre px-3 pb-3 font-mono text-[10px] leading-relaxed text-neutral-400">{code}</pre>
+      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre px-3 pb-3 font-mono text-[10px] leading-relaxed">{highlightTSX(code)}</pre>
     </div>
   )
 }
@@ -187,28 +186,43 @@ function NodeProps(props: Props & { node: Node }) {
         </Section>
       )}
 
-      {hasFill && (
+      {(hasFill || n.type === 'text') && (
         <Section title="Fill">
-          <div className="flex items-center gap-2">
-            <Toggle on={n.fill !== null} onToggle={() => props.onUpdateNode(n.id, { fill: n.fill === null ? '#ffffff' : null, fillVar: n.fill === null ? undefined : undefined })} />
-            <ColorField
-              value={n.fill ?? '#ffffff'}
-              variableId={n.fillVar}
-              disabled={n.fill === null}
-              variables={props.variables}
-              onCreateVariable={props.onCreateVariable}
-              onChange={(c, varId) => props.onUpdateNode(n.id, { fill: n.fill === null ? null : c, fillVar: varId })}
-            />
-            {n.fill !== null && (
+          {hasFill && (
+            <div className="flex items-center gap-2">
+              <Toggle on={n.fill !== null || !!n.gradient} onToggle={() => props.onUpdateNode(n.id, { fill: n.fill === null && !n.gradient ? '#ffffff' : null, gradient: null, fillVar: n.fill === null ? undefined : undefined })} />
+              <ColorField
+                value={n.fill ?? '#ffffff'}
+                variableId={n.fillVar}
+                disabled={n.fill === null || !!n.gradient}
+                variables={props.variables}
+                onCreateVariable={props.onCreateVariable}
+                onChange={(c, varId) => props.onUpdateNode(n.id, { fill: c, gradient: null, fillVar: varId })}
+              />
+              <div className="flex-1" />
               <button
-                title="Clear fill"
-                onClick={() => props.onUpdateNode(n.id, { fill: null, fillVar: undefined })}
-                className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-600 transition-colors hover:bg-white/10 hover:text-neutral-300"
+                title={n.gradient ? 'Back to solid color' : 'Gradient fill'}
+                onClick={() =>
+                  props.onUpdateNode(n.id, {
+                    gradient: n.gradient
+                      ? null
+                      : { angle: 90, stops: [{ pos: 0, color: n.fill ?? '#ffffff' }, { pos: 1, color: '#000000' }] },
+                  })
+                }
+                className={`flex h-6 items-center gap-1 rounded-md px-2 text-[10px] transition-colors ${n.gradient ? 'bg-white text-neutral-900' : 'bg-white/10 text-neutral-300 hover:bg-white/15'}`}
               >
-                <X size={12} strokeWidth={2} />
+                <svg width="10" height="10" viewBox="0 0 10 10"><defs><linearGradient id="gp" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fff"/><stop offset="1" stopColor="#444"/></linearGradient></defs><rect width="10" height="10" rx="2" fill="url(#gp)"/></svg>
+                {n.gradient ? 'Gradient' : 'Solid'}
               </button>
-            )}
-          </div>
+            </div>
+          )}
+          {n.gradient && (
+            <GradientEditor
+              value={n.gradient}
+              variables={props.variables}
+              onChange={(g) => props.onUpdateNode(n.id, { gradient: g })}
+            />
+          )}
         </Section>
       )}
 
@@ -252,7 +266,11 @@ function NodeProps(props: Props & { node: Node }) {
             className="w-full resize-none rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-[12px] leading-relaxed text-neutral-200 outline-none transition-colors focus:border-white/30"
           />
           <div className="grid grid-cols-2 gap-1.5">
-            <PresetNumField label="Size" value={n.text.fontSize} options={[8, 10, 12, 14, 16, 18, 24, 32, 48, 64, 96]} min={4} onChange={(v) => props.onUpdateText(n.id, { fontSize: v })} />
+            <PresetNumField label="Size" value={n.text.fontSize} options={[8, 10, 12, 14, 16, 18, 24, 32, 48, 64, 96]} min={4} onChange={(v) => {
+              const ratio = v / Math.max(1, n.text!.fontSize)
+              props.onUpdateNode(n.id, { width: Math.max(8, Math.round(n.width * ratio)), height: Math.max(8, Math.round(n.height * ratio)) })
+              props.onUpdateText(n.id, { fontSize: v })
+            }} />
             <label className="flex h-7 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2">
               <span className="text-[10px] text-neutral-500">Weight</span>
               <select
@@ -296,16 +314,6 @@ function NodeProps(props: Props & { node: Node }) {
         </Section>
       )}
 
-      <Section title="Timeline">
-        <TimelinePanel
-          node={n}
-          time={props.time}
-          playing={props.playing}
-          onTime={props.onTime}
-          onPlay={props.onPlaying}
-          onUpdate={(patch) => props.onUpdateNode(n.id, patch)}
-        />
-      </Section>
     </>
   )
 }
@@ -385,6 +393,17 @@ function ExportTab(props: Props) {
         >
           Export {FORMATS.find((f) => f.id === fmt)?.label} (⌘E)
         </button>
+      </Section>
+      <Section title="React project">
+        <button
+          onClick={props.onExportProject}
+          className="w-full rounded-md bg-white/10 py-1.5 text-[12px] font-medium text-neutral-200 transition-colors hover:bg-white/15"
+        >
+          Export as React + Vite project
+        </button>
+        <p className="text-[10px] leading-relaxed text-neutral-600">
+          A ready-to-run Vite app with Tailwind, framer-motion and lucide-react — animations included.
+        </p>
       </Section>
       <Section title="Document">
         <button

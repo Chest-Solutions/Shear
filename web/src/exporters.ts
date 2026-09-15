@@ -1,13 +1,14 @@
 /**
  * Client-side exporters.
  *
- * The React export only ever runs here (it produces a .tsx file, nothing
- * the Go renderer is involved in). SVG / HTML / PNG are primarily served
- * by the Go backend — the builders in this file are the fallback used
- * when the backend can't be reached, so exports never fail outright.
+ * The workspace has no artboard: exports are transparent unless the user
+ * drew their own canvas shape. The React export is animation-aware and
+ * leans on framer-motion when any node carries keyframes.
  */
 import type { Node, Scene } from './types'
 import { arrowHead, defaultCornerRadii, lineEnds, polyPoints, ptsAttr, slug } from './utils'
+import { gradientEnds, layoutTextLines } from './render'
+import { hasTimeline } from './anim'
 import { drawScene } from './render'
 
 // ---------------------------------------------------------------- helpers
@@ -42,15 +43,48 @@ function tintIcon(n: Node): string {
   return svg.split('currentColor').join(n.icon?.color || '#ffffff')
 }
 
+/** CSS linear-gradient() matching the canvas renderer's endpoints. */
+export function gradientCSS(n: Node): string | null {
+  if (!n.gradient || n.gradient.stops.length === 0) return null
+  const stops = [...n.gradient.stops].sort((a, b) => a.pos - b.pos)
+  return `linear-gradient(${num(n.gradient.angle + 90)}deg, ${stops.map((s) => `${s.color} ${num(s.pos * 100)}%`).join(', ')})`
+}
+
+let mctx: CanvasRenderingContext2D | null = null
+/** Width measurer for word wrapping outside the live canvas. */
+export function measurer(font: string): (t: string) => number {
+  if (!mctx) mctx = document.createElement('canvas').getContext('2d')
+  const ctx = mctx
+  ctx!.font = font
+  return (t: string) => ctx!.measureText(t).width
+}
+
+const UI_FONT = "Inter, -apple-system, 'Segoe UI', sans-serif"
+
+function textLines(n: Node): string[] {
+  const t = n.text!
+  return layoutTextLines(n, measurer(`${t.fontWeight} ${t.fontSize}px ${UI_FONT}`))
+}
+
 // ---------------------------------------------------------------- SVG
 
-/** Scene → standalone SVG document (static layout, vectors intact). */
+/** Scene → standalone SVG document (transparent workspace, vectors intact). */
 export function sceneToSVG(s: Scene): string {
+  const defs: string[] = []
   const parts: string[] = []
-  parts.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${num(s.width)}" height="${num(s.height)}" viewBox="0 0 ${num(s.width)} ${num(s.height)}">`,
-    `<rect width="${num(s.width)}" height="${num(s.height)}" fill="${s.background}"/>`,
-  )
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${num(s.width)}" height="${num(s.height)}" viewBox="0 0 ${num(s.width)} ${num(s.height)}">`)
+  const gradRef = (n: Node): string | null => {
+    if (!n.gradient || n.gradient.stops.length === 0) return null
+    const id = `g${n.id.replace(/[^a-zA-Z0-9]/g, '')}`
+    const [x1, y1, x2, y2] = gradientEnds(n.gradient.angle, n.width, n.height)
+    const stops = [...n.gradient.stops].sort((a, b) => a.pos - b.pos)
+    defs.push(
+      `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${num(x1)}" y1="${num(y1)}" x2="${num(x2)}" y2="${num(y2)}">${stops
+        .map((st) => `<stop offset="${num(st.pos)}" stop-color="${st.color}"/>`)
+        .join('')}</linearGradient>`,
+    )
+    return `url(#${id})`
+  }
   const walk = (list: Node[], ox: number, oy: number) => {
     for (const n of list) {
       if (!n.visible) continue
@@ -59,20 +93,18 @@ export function sceneToSVG(s: Scene): string {
       const attrs: string[] = []
       if (n.opacity < 1) attrs.push(`opacity="${num(n.opacity)}"`)
       if (n.rotation) attrs.push(`transform="rotate(${num(n.rotation)} ${num(x + n.width / 2)} ${num(y + n.height / 2)})"`)
-      const open = `<g${attrs.length ? ' ' + attrs.join(' ') : ''}>`
-      parts.push(open)
+      parts.push(`<g${attrs.length ? ' ' + attrs.join(' ') : ''}>`)
       const r = radii(n)
-      const fill = n.fill ?? 'none'
+      const fill = gradRef(n) ?? n.fill ?? 'none'
       const stroke = n.stroke && n.stroke.width > 0 ? ` stroke="${n.stroke.color}" stroke-width="${num(n.stroke.width)}"` : ''
       switch (n.type) {
         case 'frame':
-          // legacy frames export as invisible groups
           break
         case 'rect':
-          parts.push(`<rect x="${num(x)}" y="${num(y)}" width="${num(n.width)}" height="${num(n.height)}" rx="${num(Math.min(r.tl, Math.min(n.width, n.height) / 2))}" fill="${fill}"${stroke}/>`)
+          parts.push(`<rect x="${num(x)}" y="${num(y)}" width="${num(n.width)}" height="${num(n.height)}" rx="${num(Math.min(r.tl, Math.min(n.width, n.height) / 2))}" fill="${fill}"${stroke}/>` )
           break
         case 'ellipse':
-          parts.push(`<ellipse cx="${num(x + n.width / 2)}" cy="${num(y + n.height / 2)}" rx="${num(n.width / 2)}" ry="${num(n.height / 2)}" fill="${fill}"${stroke}/>`)
+          parts.push(`<ellipse cx="${num(x + n.width / 2)}" cy="${num(y + n.height / 2)}" rx="${num(n.width / 2)}" ry="${num(n.height / 2)}" fill="${fill}"${stroke}/>` )
           break
         case 'line': {
           const [lx1, ly1, lx2, ly2] = lineEnds(n)
@@ -96,8 +128,9 @@ export function sceneToSVG(s: Scene): string {
             const anchor = n.text.align === 'center' ? 'middle' : n.text.align === 'right' ? 'end' : 'start'
             const tx = n.text.align === 'center' ? x + n.width / 2 : n.text.align === 'right' ? x + n.width : x
             const lh = n.text.fontSize * 1.3
-            parts.push(`<text x="${num(tx)}" y="${num(y + n.text.fontSize)}" fill="${n.text.color}" font-size="${num(n.text.fontSize)}" font-weight="${n.text.fontWeight}" text-anchor="${anchor}" font-family="-apple-system, Inter, 'Segoe UI', sans-serif">`)
-            n.text.content.split('\n').forEach((line, i) => {
+            const tfill = gradRef(n) ?? n.text.color
+            parts.push(`<text x="${num(tx)}" y="${num(y + n.text.fontSize)}" fill="${tfill}" font-size="${num(n.text.fontSize)}" font-weight="${num(n.text.fontWeight)}" text-anchor="${anchor}" font-family="-apple-system, Inter, 'Segoe UI', sans-serif">`)
+            textLines(n).forEach((line, i) => {
               parts.push(`<tspan x="${num(tx)}" dy="${i === 0 ? 0 : num(lh)}">${escapeXml(line)}</tspan>`)
             })
             parts.push('</text>')
@@ -115,6 +148,7 @@ export function sceneToSVG(s: Scene): string {
     }
   }
   walk(s.nodes, 0, 0)
+  if (defs.length) parts.splice(1, 0, `<defs>${defs.join('')}</defs>`)
   parts.push('</svg>')
   return parts.join('\n')
 }
@@ -142,7 +176,7 @@ function escapeXml(s: string): string {
 
 // ---------------------------------------------------------------- HTML
 
-/** Scene → self-contained HTML page (static layout). */
+/** Scene → self-contained HTML page (transparent workspace). */
 export function sceneToHTML(s: Scene): string {
   const body: string[] = []
   const walk = (list: Node[], indent: string) => {
@@ -166,7 +200,7 @@ export function sceneToHTML(s: Scene): string {
   * { box-sizing: border-box; }
   body { margin: 0; display: grid; place-items: center; min-height: 100vh; background: #141414;
          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Segoe UI", sans-serif; }
-  .scene { position: relative; overflow: hidden; width: ${num(s.width)}px; height: ${num(s.height)}px; background: ${s.background}; }
+  .scene { position: relative; width: ${num(s.width)}px; height: ${num(s.height)}px; }
   .scene > div, .scene div { position: absolute; }
 </style>
 </head>
@@ -205,7 +239,9 @@ export function nodeCSS(n: Node): string {
   ]
   if (n.opacity < 1) style.push(`opacity:${num(n.opacity)}`)
   if (n.rotation) style.push(`transform:rotate(${num(n.rotation)}deg)`)
-  if (n.fill) style.push(`background:${n.fill}`)
+  const grad = gradientCSS(n)
+  if (grad) style.push(`background:${grad}`)
+  else if (n.fill) style.push(`background:${n.fill}`)
   if (n.stroke && n.stroke.width > 0) style.push(`border:${num(n.stroke.width)}px solid ${n.stroke.color}`)
   if (r.tl + r.tr + r.br + r.bl > 0) style.push(`border-radius:${num(r.tl)}px ${num(r.tr)}px ${num(r.br)}px ${num(r.bl)}px`)
   if (shadowCSS(n)) style.push(`box-shadow:${shadowCSS(n)}`)
@@ -213,27 +249,74 @@ export function nodeCSS(n: Node): string {
   if (backdropBlur(n)) style.push(`backdrop-filter:blur(${num(backdropBlur(n))}px);-webkit-backdrop-filter:blur(${num(backdropBlur(n))}px)`)
   if (n.type === 'ellipse') style.push('border-radius:50%')
   if (n.type === 'line') {
-    style.splice(style.findIndex((x) => x.startsWith('background')), 1)
+    const bgIdx = style.findIndex((x) => x.startsWith('background'))
+    if (bgIdx >= 0) style.splice(bgIdx, 1)
     const idx = style.findIndex((x) => x.startsWith('border:'))
     if (idx >= 0) style.splice(idx, 1)
     style.push('border:none', `border-top:${num(n.stroke?.width ?? 2)}px solid ${n.stroke?.color ?? '#ffffff'}`)
   }
   if (n.type === 'text' && n.text) {
     style.push(
-      `color:${n.text.color}`,
+      `color:${n.gradient ? 'transparent' : n.text.color}`,
       `font-size:${num(n.text.fontSize)}px`,
       `font-weight:${n.text.fontWeight}`,
       `text-align:${n.text.align}`,
       'line-height:1.3',
       'white-space:pre-wrap',
+      'overflow-wrap:break-word',
     )
+    if (n.gradient) {
+      style.push(`background:${grad}`, '-webkit-background-clip:text', 'background-clip:text')
+    }
   }
   return style.join(';')
 }
 
 // ---------------------------------------------------------------- React
 
-/** Scene → a dependency-free React component (.tsx). */
+/** Sampled framer-motion keyframe arrays for a node's timeline. */
+function motionAttrs(n: Node): { props: string; transition: string } | null {
+  const tl = n.timeline
+  if (!tl || tl.tracks.length === 0 || !hasTimeline(n)) return null
+  const times = new Set<number>([0])
+  for (const tr of tl.tracks) for (const k of tr.keys) times.add(Math.min(k.time, tl.duration))
+  const ts = [...times].sort((a, b) => a - b)
+  const dur = Math.max(tl.duration, ts[ts.length - 1] ?? 0, 0.1)
+  const norm = ts.map((t) => Math.round((t / dur) * 1000) / 1000)
+
+  const get = (prop: string) => {
+    const tr = tl.tracks.find((t) => t.property === prop)
+    if (!tr) return null
+    // sample through the easing so the exported arrays match playback
+    return ts.map((t) => sampleFor(tr, t))
+  }
+
+  const pos = get('position')
+  const scale = get('scale')
+  const rot = get('rotation')
+  const opa = get('opacity')
+  const out: string[] = []
+  if (pos) {
+    out.push(`x: [${pos.map((v) => num((Array.isArray(v) ? v[0] : 0) - n.x)).join(', ')}]`)
+    out.push(`y: [${pos.map((v) => num((Array.isArray(v) ? v[1] : 0) - n.y)).join(', ')}]`)
+  }
+  if (scale) out.push(`scale: [${scale.map((v) => num(Number(v))).join(', ')}]`)
+  if (rot) out.push(`rotate: [${rot.map((v) => num(Number(v))).join(', ')}]`)
+  if (opa) out.push(`opacity: [${opa.map((v) => num(Number(v))).join(', ')}]`)
+  if (out.length === 0) return null
+  return {
+    props: out.join(', '),
+    transition: `{ duration: ${num(dur)}, times: [${norm.join(', ')}], ease: 'easeInOut'${tl.loop ? ', repeat: Infinity' : ''} }`,
+  }
+}
+
+import { sampleTrack } from './anim'
+import type { Track } from './types'
+function sampleFor(tr: Track, t: number) {
+  return sampleTrack(tr, t)
+}
+
+/** Scene → React component (.tsx). Uses framer-motion when animated. */
 export function sceneToReact(s: Scene): string {
   const componentName =
     slug(s.name)
@@ -241,34 +324,41 @@ export function sceneToReact(s: Scene): string {
       .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
       .join('') || 'Scene'
 
+  const animated = s.nodes.some((n) => hasTimeline(n))
+  const div = animated ? 'motion.div' : 'div'
+
   const body: string[] = []
   const walk = (list: Node[], indent: string) => {
     for (const n of list) {
       if (!n.visible) continue
       const style = reactStyle(n)
+      const anim = motionAttrs(n)
+      const animProps = anim ? `\n${indent}  animate={{ ${anim.props} }}\n${indent}  transition={${anim.transition}}` : ''
       if (n.type === 'icon' && n.icon) {
-        body.push(`${indent}<div style={${style}} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(iconHTML(n))} }} />`)
+        body.push(`${indent}<${div} style={${style}}${animProps} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(iconHTML(n))} }} />`)
         continue
       }
       if (n.type === 'poly' || (n.type === 'line' && n.arrow)) {
-        body.push(`${indent}<div style={${style}} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(shapeSVG(n))} }} />`)
+        body.push(`${indent}<${div} style={${style}}${animProps} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(shapeSVG(n))} }} />`)
         continue
       }
-      const content = n.type === 'text' ? escapeXml(n.text?.content ?? '') : ''
+      const content = n.type === 'text' ? (n.text?.content ?? '') : ''
       if (n.children?.length) {
-        body.push(`${indent}<div style={${style}}>`)
+        body.push(`${indent}<${div} style={${style}}${animProps}>`)
         walk(n.children, indent + '  ')
-        body.push(`${indent}</div>`)
+        body.push(`${indent}</${div}>`)
       } else {
-        body.push(`${indent}<div style={${style}}>${content}</div>`)
+        body.push(`${indent}<${div} style={${style}}${animProps}>${content}</${div}>`)
       }
     }
   }
   walk(s.nodes, '      ')
 
-  return `// Generated by Shear — scene "${s.name}" (${Math.round(s.width)}×${Math.round(s.height)})
-// Dependency-free: paste into any React project.
+  const header = animated
+    ? `// Generated by Shear — scene "${s.name}" (${Math.round(s.width)}×${Math.round(s.height)})\n// Animated with framer-motion.\n\nimport { motion } from 'framer-motion'\n`
+    : `// Generated by Shear — scene "${s.name}" (${Math.round(s.width)}×${Math.round(s.height)})\n// Dependency-free: paste into any React project.\n`
 
+  return `${header}
 export default function ${componentName}() {
   return (
     <div
@@ -276,7 +366,6 @@ export default function ${componentName}() {
         position: 'relative',
         width: ${num(s.width)},
         height: ${num(s.height)},
-        background: '${s.background}',
         overflow: 'hidden',
         fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, 'Segoe UI', sans-serif",
       }}
@@ -299,7 +388,6 @@ function reactStyle(n: Node): string {
     const key = decl.slice(0, i)
     let value: string = decl.slice(i + 1)
     const camel = key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())
-    // dimensional values stay numbers where React prefers it
     if (/^-?[\d.]+px$/.test(value) && !value.startsWith('0.')) {
       props.push(`${camel}: ${value.slice(0, -2)}`)
     } else if (/^-?[\d.]+$/.test(value)) {

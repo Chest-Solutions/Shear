@@ -78,6 +78,19 @@ export function LeftPanel(props: Props) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropBefore, setDropBefore] = useState<string | null | 'end'>(null)
+  const [query, setQuery] = useState('')
+
+  // front-most first, like Lunacy: the top row renders above everything
+  const displayNodes = [...scene.nodes].reverse().filter((n) => !query || n.name.toLowerCase().includes(query.toLowerCase()))
+
+  // a visual "drop above X" means "in front of X" = after X in array order
+  const visualBeforeToArrayBefore = (xId: string | null): string | null => {
+    if (xId === 'end') return scene.nodes[0]?.id ?? null // bottom of list = back-most
+    if (xId === null) return null
+    const i = scene.nodes.findIndex((n) => n.id === xId)
+    if (i === -1) return null
+    return i + 1 < scene.nodes.length ? scene.nodes[i + 1].id : null
+  }
 
   const layerRows = (nodes: Node[], depth: number) =>
     nodes.map((n) => (
@@ -107,7 +120,7 @@ export function LeftPanel(props: Props) {
             if (dragId && dragId !== n.id) setDropBefore(before ? n.id : null)
           }}
           onDrop={() => {
-            if (dragId && dragId !== n.id) props.onReorder(dragId, n.id)
+            if (dragId && dragId !== n.id) props.onReorder(dragId, visualBeforeToArrayBefore(n.id))
             setDragId(null)
             setDropBefore(null)
           }}
@@ -178,8 +191,14 @@ export function LeftPanel(props: Props) {
               </div>
             </div>
 
-            <div className="flex items-center justify-between px-3 pb-1 pt-3">
+            <div className="flex items-center justify-between gap-2 px-3 pb-1 pt-3">
               <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">Layers</span>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search"
+                className="h-6 w-24 rounded-md border border-white/10 bg-white/5 px-2 text-[10px] text-neutral-300 outline-none placeholder:text-neutral-600 focus:border-white/25"
+              />
             </div>
             <div className="flex-1 overflow-y-auto px-1.5 pb-2">
               {scene.nodes.length === 0 ? (
@@ -187,7 +206,7 @@ export function LeftPanel(props: Props) {
                   Pick a tool and draw on the canvas. Click an icon in the Icons tab to place it with your cursor.
                 </p>
               ) : (
-                <>{layerRows(scene.nodes, 0)}</>
+                <>{layerRows(displayNodes, 0)}</>
               )}
               {dragId && (
                 <div
@@ -197,7 +216,7 @@ export function LeftPanel(props: Props) {
                     setDropBefore('end')
                   }}
                   onDrop={() => {
-                    if (dragId) props.onReorder(dragId, null)
+                    if (dragId) props.onReorder(dragId, visualBeforeToArrayBefore('end'))
                     setDragId(null)
                     setDropBefore(null)
                   }}

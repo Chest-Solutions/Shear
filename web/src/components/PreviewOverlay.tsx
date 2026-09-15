@@ -79,7 +79,7 @@ export function PreviewOverlay({ scene, open, onClose }: { scene: Scene; open: b
             style={{
               width: scene.width,
               height: scene.height,
-              background: scene.background,
+              background: 'transparent',
               maxWidth: '86vw',
               maxHeight: '78vh',
             }}

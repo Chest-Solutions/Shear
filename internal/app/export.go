@@ -29,7 +29,6 @@ func RenderSceneSVG(s Scene) string {
 	if defs.Len() > 0 {
 		fmt.Fprintf(&b, "<defs>\n%s</defs>\n", defs.String())
 	}
-	fmt.Fprintf(&b, `<rect width="%s" height="%s" fill="%s"/>`+"\n", num(s.Width), num(s.Height), attr(s.Background))
 	b.WriteString(body.String())
 	b.WriteString("</svg>\n")
 	return b.String()
@@ -80,8 +79,8 @@ func svgNode(body, defs *strings.Builder, n Node, ctr *int) {
 	body.WriteString(open + ">\n")
 
 	fill := "none"
-	if n.Fill != nil {
-		fill = *n.Fill
+	if fillStr := fillColorOf(n); fillStr != "" {
+		fill = fillStr
 	}
 	stroke := ""
 	if n.Stroke != nil && n.Stroke.Width > 0 {
@@ -271,7 +270,7 @@ func RenderSceneHTML(s Scene) string {
   * { box-sizing: border-box; }
   body { margin: 0; display: grid; place-items: center; min-height: 100vh; background: #1c1c1e;
          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Segoe UI", sans-serif; }
-  .scene { position: relative; overflow: hidden; width: %spx; height: %spx; background: %s; }
+  .scene { position: relative; overflow: hidden; width: %spx; height: %spx; }
   .node { position: absolute; }
   @media (prefers-reduced-motion: reduce) { .node { animation: none !important; transition: none !important; } }
 %s</style>
@@ -281,7 +280,7 @@ func RenderSceneHTML(s Scene) string {
 %s  </div>
 </body>
 </html>
-`, html.EscapeString(s.Name), num(s.Width), num(s.Height), attr(s.Background), css.String(), body.String())
+`, html.EscapeString(s.Name), num(s.Width), num(s.Height), css.String(), body.String())
 }
 
 func htmlNode(body, css *strings.Builder, n Node, ctr *int, indent int) {
@@ -304,8 +303,8 @@ func htmlNode(body, css *strings.Builder, n Node, ctr *int, indent int) {
 	if n.Rotation != 0 {
 		style = append(style, "transform:rotate("+num(n.Rotation)+"deg)")
 	}
-	if n.Fill != nil && n.Type != NodePoly {
-		style = append(style, "background:"+*n.Fill)
+	if fillStr := fillColorOf(n); fillStr != "" && n.Type != NodePoly {
+		style = append(style, "background:"+fillStr)
 	}
 	if n.Stroke != nil && n.Stroke.Width > 0 && n.Type != NodePoly {
 		style = append(style, fmt.Sprintf("border:%spx solid %s", num(n.Stroke.Width), n.Stroke.Color))

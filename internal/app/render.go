@@ -462,6 +462,18 @@ func clipToBox(img *image.RGBA, pad, w, h float64) {
 	}
 }
 
+// fillColorOf resolves the paint colour: solid fill first, then the
+// first gradient stop as a graceful fallback for the raster pipeline.
+func fillColorOf(n Node) string {
+	if n.Fill != nil {
+		return *n.Fill
+	}
+	if n.Gradient != nil && len(n.Gradient.Stops) > 0 {
+		return n.Gradient.Stops[0].Color
+	}
+	return ""
+}
+
 // nodeCanvas renders one node's own geometry (frame children excluded)
 // into a padded RGBA canvas. Returns the canvas and the padding.
 func nodeCanvas(n Node) (*image.RGBA, float64) {
@@ -481,8 +493,9 @@ func nodeCanvas(n Node) (*image.RGBA, float64) {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 
 	fillCol, hasFill := color.RGBA{}, false
-	if n.Fill != nil {
-		if c, ok := ParseColor(*n.Fill); ok {
+	fillStr := fillColorOf(n)
+	if fillStr != "" {
+		if c, ok := ParseColor(fillStr); ok {
 			fillCol, hasFill = c, true
 		}
 	}
@@ -738,25 +751,9 @@ func RenderScene(s Scene, scale float64) ([]byte, error) {
 		return nil, fmt.Errorf("scene too large (max 8192px)")
 	}
 
-	bg, ok := ParseColor(s.Background)
-	if !ok {
-		bg = color.RGBA{R: 23, G: 23, B: 23, A: 255}
-	}
-	if bg.A == 0 {
-		bg.A = 255
-	}
-
+	// transparent workspace — a visible canvas is a shape the user drew
 	lo := image.NewRGBA(image.Rect(0, 0, loW, loH))
-	for y := 0; y < loH; y++ {
-		p := lo.PixOffset(0, y)
-		for x := 0; x < loW; x++ {
-			lo.Pix[p+0] = bg.R
-			lo.Pix[p+1] = bg.G
-			lo.Pix[p+2] = bg.B
-			lo.Pix[p+3] = 255
-			p += 4
-		}
-	}
+
 	renderTree(lo, s.Nodes, 0, 0)
 
 	if scale == 1 {

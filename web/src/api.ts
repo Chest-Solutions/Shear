@@ -19,6 +19,7 @@ export interface DocSummary {
   id: string
   name: string
   updatedAt: string
+  createdAt: string
   scenes: number
 }
 

@@ -112,6 +112,7 @@ type Summary struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	UpdatedAt string `json:"updatedAt"`
+	CreatedAt string `json:"createdAt"`
 	Scenes    int    `json:"scenes"`
 }
 
@@ -121,7 +122,11 @@ func (s *Store) List() []Summary {
 	defer s.mu.RUnlock()
 	out := make([]Summary, 0, len(s.cache))
 	for _, d := range s.cache {
-		out = append(out, Summary{ID: d.ID, Name: d.Name, UpdatedAt: d.UpdatedAt, Scenes: len(d.Scenes)})
+		ca := d.CreatedAt
+		if ca == "" {
+			ca = d.UpdatedAt
+		}
+		out = append(out, Summary{ID: d.ID, Name: d.Name, UpdatedAt: d.UpdatedAt, CreatedAt: ca, Scenes: len(d.Scenes)})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].UpdatedAt > out[j].UpdatedAt

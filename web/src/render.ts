@@ -79,14 +79,56 @@ function filters(n: Node): string {
   return parts.join(' ') || 'none'
 }
 
+/** Gradient endpoints across a w×h box, matching the CSS/SVG exporters. */
+export function gradientEnds(angle: number, w: number, h: number): [number, number, number, number] {
+  const rad = (angle * Math.PI) / 180
+  const dx = Math.cos(rad)
+  const dy = Math.sin(rad)
+  const len = (Math.abs(w * dx) + Math.abs(h * dy)) / 2 || 1
+  const cx = w / 2
+  const cy = h / 2
+  return [cx - dx * len, cy - dy * len, cx + dx * len, cy + dy * len]
+}
+
+export function paintFor(ctx: CanvasRenderingContext2D, n: Node, fallback: string | null): string | CanvasGradient | null {
+  if (n.gradient && n.gradient.stops.length > 0) {
+    const [x1, y1, x2, y2] = gradientEnds(n.gradient.angle, n.width, n.height)
+    const g = ctx.createLinearGradient(x1, y1, x2, y2)
+    for (const st of [...n.gradient.stops].sort((a, b) => a.pos - b.pos)) g.addColorStop(Math.min(1, Math.max(0, st.pos)), st.color)
+    return g
+  }
+  return fallback
+}
+
+/** Word-wrap text into the node's width; explicit newlines still honoured. */
+export function layoutTextLines(n: Node, measure: (txt: string) => number): string[] {
+  const t = n.text
+  if (!t) return []
+  const out: string[] = []
+  for (const raw of t.content.split('\n')) {
+    const words = raw.split(/\s+/).filter(Boolean)
+    if (words.length === 0) { out.push(''); continue }
+    let line = words[0]
+    for (const w of words.slice(1)) {
+      const probe = line + ' ' + w
+      if (measure(probe) <= n.width || measure(line) > n.width) line = probe
+      else { out.push(line); line = w }
+    }
+    out.push(line)
+  }
+  return out
+}
+
 function drawText(ctx: CanvasRenderingContext2D, n: Node) {
   const t = n.text
   if (!t) return
-  ctx.fillStyle = t.color
+  const paint = paintFor(ctx, n, t.color)
+  if (!paint) return
+  ctx.fillStyle = paint
   ctx.font = `${t.fontWeight} ${t.fontSize}px ${UI_FONT}`
   ctx.textAlign = t.align
   ctx.textBaseline = 'top'
-  const lines = t.content.split('\n')
+  const lines = layoutTextLines(n, (txt) => ctx.measureText(txt).width)
   const lineHeight = t.fontSize * 1.3
   const x = t.align === 'left' ? 0 : t.align === 'center' ? n.width / 2 : n.width
   for (let i = 0; i < lines.length; i++) {
@@ -111,10 +153,10 @@ function drawGeometry(ctx: CanvasRenderingContext2D, n: Node, shadow = false) {
       // legacy frames are invisible containers — only their children draw
       break
     case 'rect': {
-      if (n.fill) {
+      if (n.fill || n.gradient) {
         roundedPath(ctx, 0, 0, n.width, n.height, r)
-        ctx.fillStyle = n.fill
-        ctx.fill()
+        const paint = paintFor(ctx, n, n.fill)
+        if (paint) { ctx.fillStyle = paint; ctx.fill() }
       }
       if (!shadow && n.stroke && n.stroke.width > 0) {
         roundedPath(ctx, 0, 0, n.width, n.height, r)
@@ -128,9 +170,9 @@ function drawGeometry(ctx: CanvasRenderingContext2D, n: Node, shadow = false) {
     case 'ellipse': {
       ctx.beginPath()
       ctx.ellipse(n.width / 2, n.height / 2, Math.max(0, n.width / 2), Math.max(0, n.height / 2), 0, 0, Math.PI * 2)
-      if (n.fill) {
-        ctx.fillStyle = n.fill
-        ctx.fill()
+      if (n.fill || n.gradient) {
+        const paint = paintFor(ctx, n, n.fill)
+        if (paint) { ctx.fillStyle = paint; ctx.fill() }
       }
       if (!shadow && n.stroke && n.stroke.width > 0) {
         ctx.strokeStyle = n.stroke.color
@@ -170,10 +212,10 @@ function drawGeometry(ctx: CanvasRenderingContext2D, n: Node, shadow = false) {
       break
     }
     case 'poly': {
-      if (n.fill) {
+      if (n.fill || n.gradient) {
         polyPath(ctx, n)
-        ctx.fillStyle = n.fill
-        ctx.fill()
+        const paint = paintFor(ctx, n, n.fill)
+        if (paint) { ctx.fillStyle = paint; ctx.fill() }
       }
       if (!shadow && n.stroke && n.stroke.width > 0) {
         polyPath(ctx, n)
@@ -254,14 +296,7 @@ export function drawNode(ctx: CanvasRenderingContext2D, n: Node) {
 }
 
 export function drawScene(ctx: CanvasRenderingContext2D, scene: Scene) {
-  ctx.save()
-  ctx.shadowColor = 'rgba(0,0,0,0.5)'
-  ctx.shadowBlur = 30
-  ctx.shadowOffsetY = 4
-  ctx.fillStyle = scene.background
-  ctx.fillRect(0, 0, scene.width, scene.height)
-  ctx.restore()
-
+  // no artboard: the workspace is open space; a "canvas" is just a shape
   for (const n of scene.nodes) drawNode(ctx, n)
 }
 

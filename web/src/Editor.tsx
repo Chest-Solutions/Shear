@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ColorVariable, Document, LineVariant, Node, OvalVariant, RectVariant, Scene, SceneFormat, Tool } from './types'
+import type { ColorVariable, Document, LineVariant, Node, RectVariant, Scene, SceneFormat, Tool } from './types'
 import { uid, clone, slug, downloadBlob, clamp, round1, makeNode, defaultCornerRadii } from './utils'
 import { exportSceneHTML, exportScenePNG, exportSceneSVG, getDocument, saveDocument } from './api'
 import { sceneToReact } from './exporters'
 import { resolveNodes, sceneDuration, sceneLoops, syncTree } from './anim'
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceBetween, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceBetween, FlipHorizontal2, FlipVertical2 } from 'lucide-react'
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceBetween, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceBetween, ChevronsDown, ChevronsUp, FlipHorizontal2, FlipVertical2 } from 'lucide-react'
 import { TopBar, PresencePill } from './components/TopBar'
 import { VerticalToolbar } from './components/VerticalToolbar'
+import { TimelineBar } from './components/TimelineBar'
+import { reactProjectZip } from './reactProject'
 import { LeftPanel } from './components/LeftPanel'
 import { RightPanel } from './components/RightPanel'
 import { CanvasView, findAny } from './components/CanvasView'
@@ -36,7 +38,8 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
   const [tool, setTool] = useState<Tool>('select')
   const [rectVar, setRectVar] = useState<RectVariant>('rect')
   const [lineVar, setLineVar] = useState<LineVariant>('line')
-  const [ovalVar, setOvalVar] = useState<OvalVariant>('ellipse')
+  const [ovalVar, setOvalVar] = useState<'ellipse' | 'triangle' | 'polygon'>('ellipse')
+  const [animMode, setAnimMode] = useState(false)
   const [stamp, setStamp] = useState<{ svg: string; color: string; name: string } | null>(null)
   const [leftTab, setLeftTab] = useState<'layers' | 'icons'>('layers')
   const [rightTab, setRightTab] = useState<'design' | 'export' | 'code'>('design')
@@ -866,8 +869,7 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
             setTool('line')
             return
           case 'o':
-            if (tool === 'ellipse')
-              setOvalVar((v) => (v === 'ellipse' ? 'triangle' : v === 'triangle' ? 'polygon' : v === 'polygon' ? 'star' : 'ellipse'))
+            if (tool === 'ellipse') setOvalVar((v) => (v === 'ellipse' ? 'triangle' : v === 'triangle' ? 'polygon' : 'ellipse'))
             setTool('ellipse')
             return
           case 't':
@@ -988,19 +990,6 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
   }, [selectionIds, scene])
 
-  const cycleRect = useCallback(() => {
-    if (tool === 'rect') setRectVar((v) => (v === 'rect' ? 'rounded' : 'rect'))
-    setTool('rect')
-  }, [tool])
-  const cycleLine = useCallback(() => {
-    if (tool === 'line') setLineVar((v) => (v === 'line' ? 'arrow' : 'line'))
-    setTool('line')
-  }, [tool])
-  const cycleOval = useCallback(() => {
-    if (tool === 'ellipse')
-      setOvalVar((v) => (v === 'ellipse' ? 'triangle' : v === 'triangle' ? 'polygon' : v === 'polygon' ? 'star' : 'ellipse'))
-    setTool('ellipse')
-  }, [tool])
 
   if (loading) {
     return (
@@ -1022,6 +1011,8 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
         canRedo={future.current.length > 0 && historyTick >= 0}
         onImport={importJSON}
         onPlay={() => setPlaying(true)}
+        onAnimMode={() => setAnimMode((v) => !v)}
+        animMode={animMode}
         onHome={onHome}
         zoom={viewport.zoom}
         onZoomIn={() => zoomBy(1.2)}
@@ -1098,9 +1089,9 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
           rectVar={rectVar}
           lineVar={lineVar}
           ovalVar={ovalVar}
-          onCycleRect={cycleRect}
-          onCycleLine={cycleLine}
-          onCycleOval={cycleOval}
+          onRect={(v) => { setRectVar(v); setTool('rect') }}
+          onLine={(v) => { setLineVar(v); setTool('line') }}
+          onOval={(v) => { setOvalVar(v); setTool('ellipse') }}
           onTool={setTool}
           left={leftOpen ? 52 + 240 + 12 : 52 + 12}
         />
@@ -1113,6 +1104,13 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
             onAlign={alignSelection}
             onDistribute={distributeSelection}
             onFlip={flipSelection}
+            onToFront={() => selectionIds.forEach((id) => reorderNode(id, null))}
+            onToBack={() =>
+              selectionIds.forEach((id) => {
+                const first = scene.nodes.find((n) => n.id !== id)
+                reorderNode(id, first?.id ?? null)
+              })
+            }
           />
         )}
 
@@ -1139,11 +1137,22 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
           onLockAspect={setLockAspect}
           onExportScene={(fmt) => void doExportScene(currentSceneId, fmt)}
           onExportShear={exportShear}
-          time={time}
-          playing={timelinePlaying}
-          onTime={setTime}
-          onPlaying={setTimelinePlaying}
+          onExportProject={() => {
+            downloadBlob(reactProjectZip(scene), `${slug(doc.name)}-react-project.zip`)
+          }}
         />
+
+        {animMode && (
+          <TimelineBar
+            node={selectedNode}
+            time={time}
+            playing={timelinePlaying}
+            onTime={setTime}
+            onPlaying={setTimelinePlaying}
+            onTimeline={(id, tl) => updateNode(id, { timeline: tl })}
+            onClose={() => setAnimMode(false)}
+          />
+        )}
       </div>
       <PreviewOverlay scene={scene} open={playing} onClose={() => setPlaying(false)} />
 
@@ -1186,6 +1195,8 @@ function ContextToolbar(props: {
   onAlign: (m: 'left' | 'centerH' | 'right' | 'top' | 'midV' | 'bottom') => void
   onDistribute: (m: 'h' | 'v') => void
   onFlip: (m: 'h' | 'v') => void
+  onToFront: () => void
+  onToBack: () => void
 }) {
   const vp = props.viewport
   const left = vp.panX + props.bbox.x * vp.zoom + (props.bbox.w * vp.zoom) / 2
@@ -1212,6 +1223,13 @@ function ContextToolbar(props: {
       <span className="mx-0.5 h-4 w-px bg-white/10" />
       <CtxBtn title="Flip horizontal" onClick={() => props.onFlip('h')}><FlipHorizontal2 size={13} strokeWidth={1.8} /></CtxBtn>
       <CtxBtn title="Flip vertical" onClick={() => props.onFlip('v')}><FlipVertical2 size={13} strokeWidth={1.8} /></CtxBtn>
+      {props.count === 1 && (
+        <>
+          <span className="mx-0.5 h-4 w-px bg-white/10" />
+          <CtxBtn title="Bring to front" onClick={props.onToFront}><ChevronsUp size={13} strokeWidth={1.8} /></CtxBtn>
+          <CtxBtn title="Send to back" onClick={props.onToBack}><ChevronsDown size={13} strokeWidth={1.8} /></CtxBtn>
+        </>
+      )}
     </div>
   )
 }

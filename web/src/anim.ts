@@ -26,15 +26,17 @@ export function emptyTimeline(): Timeline {
 
 /** Ranges for each animatable property, used by sliders and the editor. */
 export const PROP_RANGE: Record<AnimProp, { min: number; max: number; step: number; suffix?: string }> = {
+  position: { min: -4000, max: 4000, step: 1 },
+  scale: { min: 0, max: 4, step: 0.01 },
+  rotation: { min: -720, max: 720, step: 1, suffix: '°' },
+  opacity: { min: 0, max: 1, step: 0.01 },
+  fill: { min: 0, max: 0, step: 0 },
+  blur: { min: 0, max: 50, step: 0.5 },
+  shadow: { min: -400, max: 400, step: 1 },
   x: { min: -4000, max: 4000, step: 1 },
   y: { min: -4000, max: 4000, step: 1 },
   width: { min: 1, max: 4000, step: 1 },
   height: { min: 1, max: 4000, step: 1 },
-  rotation: { min: -720, max: 720, step: 1, suffix: '°' },
-  opacity: { min: 0, max: 1, step: 0.01 },
-  scale: { min: 0, max: 4, step: 0.01 },
-  fill: { min: 0, max: 0, step: 0 },
-  blur: { min: 0, max: 50, step: 0.5 },
   brightness: { min: -100, max: 100, step: 1 },
   contrast: { min: -100, max: 100, step: 1 },
   saturation: { min: -100, max: 100, step: 1 },
@@ -47,9 +49,16 @@ export function isColorProp(p: AnimProp): boolean {
 }
 
 /** The node's current value for a property — the starting point of a track. */
+export function shadowOf(n: Node): { x: number; y: number; blur: number } {
+  const sh = (n.effects ?? []).find((e) => e.type === 'drop-shadow')
+  return sh && sh.type === 'drop-shadow' ? { x: sh.x, y: sh.y, blur: sh.blur } : { x: 0, y: 0, blur: 0 }
+}
+
 export function currentValue(n: Node, p: AnimProp): KeyValue {
   const a = { ...defaultAdjust(), ...(n.adjust ?? {}) }
   switch (p) {
+    case 'position': return [n.x, n.y]
+    case 'shadow': { const sh = shadowOf(n); return [sh.x, sh.y, sh.blur] }
     case 'x': return n.x
     case 'y': return n.y
     case 'width': return n.width
@@ -152,7 +161,11 @@ export function lerpValue(a: KeyValue, b: KeyValue, t: number): KeyValue {
   if (typeof a === 'string' || typeof b === 'string') {
     return lerpColor(String(a), String(b), t)
   }
-  return lerp(a, b, t)
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const len = Math.max(a.length, b.length)
+    return Array.from({ length: len }, (_, i) => lerp(Number(a[i] ?? 0), Number(b[i] ?? 0), t))
+  }
+  return lerp(Number(a), Number(b), t)
 }
 
 // ---------------------------------------------------------------- sampling
@@ -211,6 +224,24 @@ export function resolveNode(n: Node, t: number): Node {
     const v = sampleTrack(track, time)
     if (v === undefined) continue
     switch (track.property) {
+      case 'position': {
+        const arr = Array.isArray(v) ? v : [Number(v), out.y]
+        out.x = Number(arr[0]); out.y = Number(arr[1] ?? out.y); break
+      }
+      case 'shadow': {
+        const arr = Array.isArray(v) ? v : [0, 0, Number(v)]
+        const sx = Number(arr[0] ?? 0), sy = Number(arr[1] ?? 0), sb = Number(arr[2] ?? 0)
+        const effects = [...(out.effects ?? [])]
+        const i = effects.findIndex((e) => e.type === 'drop-shadow')
+        if (i >= 0) {
+          const e = effects[i]
+          if (e.type === 'drop-shadow') effects[i] = { ...e, x: sx, y: sy, blur: sb }
+        } else {
+          effects.push({ id: 'anim-shadow', type: 'drop-shadow', visible: true, color: '#000000', x: sx, y: sy, blur: sb, spread: 0 })
+        }
+        out.effects = effects
+        break
+      }
       case 'x': out.x = Number(v); break
       case 'y': out.y = Number(v); break
       case 'width': out.width = Number(v); break
@@ -310,18 +341,6 @@ export function adjustCSS(a: Adjust | undefined): string {
 
 // ---------------------------------------------------------------- auto-key
 
-/** Which track a node property belongs to, if any. */
-const PROP_OF_FIELD: Record<string, AnimProp> = {
-  x: 'x',
-  y: 'y',
-  width: 'width',
-  height: 'height',
-  rotation: 'rotation',
-  opacity: 'opacity',
-  fill: 'fill',
-  cornerRadius: 'radius',
-}
-
 const PROP_OF_ADJUST: Record<string, AnimProp> = {
   blur: 'blur',
   brightness: 'brightness',
@@ -330,7 +349,7 @@ const PROP_OF_ADJUST: Record<string, AnimProp> = {
   hue: 'hue',
 }
 
-function upsertKey(track: Track, time: number, value: KeyValue): Track {
+export function upsertKey(track: Track, time: number, value: KeyValue): Track {
   const at = track.keys.find((k) => Math.abs(k.time - time) < 0.02)
   if (at) {
     return { ...track, keys: track.keys.map((k) => (k.id === at.id ? { ...k, value } : k)) }
@@ -353,30 +372,39 @@ export function syncKeyframes(before: Node, after: Node, time: number): Node {
 
   let tracks = tl.tracks
   let changed = false
-
-  for (const [field, prop] of Object.entries(PROP_OF_FIELD)) {
-    const b = (before as unknown as Record<string, unknown>)[field]
-    const a = (after as unknown as Record<string, unknown>)[field]
-    if (a === undefined || a === b) continue
+  const upsert = (prop: AnimProp, value: KeyValue) => {
     const i = tracks.findIndex((t) => t.property === prop)
-    if (i === -1) continue
-    tracks = tracks.map((t, j) => (j === i ? upsertKey(t, time, a as KeyValue) : t))
+    // keyframing only happens while the property's stopwatch is armed
+    if (i === -1 || !tracks[i].armed) return
+    tracks = tracks.map((t, j) => (j === i ? upsertKey(t, time, value) : t))
     changed = true
   }
 
-  if (before.adjust || after.adjust) {
-    const ba = { ...defaultAdjust(), ...(before.adjust ?? {}) }
-    const aa = { ...defaultAdjust(), ...(after.adjust ?? {}) }
-    for (const [field, prop] of Object.entries(PROP_OF_ADJUST)) {
-      const b = (ba as unknown as Record<string, number>)[field]
-      const a = (aa as unknown as Record<string, number>)[field]
-      if (a === b) continue
-      const i = tracks.findIndex((t) => t.property === prop)
-      if (i === -1) continue
-      tracks = tracks.map((t, j) => (j === i ? upsertKey(t, time, a) : t))
-      changed = true
-    }
+  // position: x/y edits land on a single Position track
+  if (after.x !== before.x || after.y !== before.y) upsert('position', [after.x, after.y])
+  // scale: width/height edits become a scale factor around the base size
+  if (after.width !== before.width || after.height !== before.height) {
+    upsert('scale', Math.round((after.width / Math.max(1, before.width)) * 1000) / 1000)
   }
+  if (after.rotation !== before.rotation) upsert('rotation', after.rotation)
+  if (after.opacity !== before.opacity) upsert('opacity', after.opacity)
+  if (after.fill !== before.fill) upsert('fill', after.fill ?? '#ffffff')
+  if ((after.cornerRadius ?? 0) !== (before.cornerRadius ?? 0)) upsert('radius', after.cornerRadius ?? 0)
+
+  const ba = { ...defaultAdjust(), ...(before.adjust ?? {}) }
+  const aa = { ...defaultAdjust(), ...(after.adjust ?? {}) }
+  if (aa.blur !== ba.blur) upsert('blur', aa.blur)
+  for (const [field, prop] of Object.entries(PROP_OF_ADJUST)) {
+    if (prop === 'blur') continue
+    const b = (ba as unknown as Record<string, number>)[field]
+    const a = (aa as unknown as Record<string, number>)[field]
+    if (a !== b) upsert(prop, a)
+  }
+
+  // shadow effect edits
+  const bs = shadowOf(before)
+  const as2 = shadowOf(after)
+  if (as2.x !== bs.x || as2.y !== bs.y || as2.blur !== bs.blur) upsert('shadow', [as2.x, as2.y, as2.blur])
 
   return changed ? { ...after, timeline: { ...tl, tracks } } : after
 }

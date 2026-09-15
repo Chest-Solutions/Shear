@@ -64,7 +64,6 @@ type Effect struct {
 	Spread  float64 `json:"spread,omitempty"`
 }
 
-
 // Trigger is what starts a timeline.
 //
 //	view  — plays when the design is first shown
@@ -147,23 +146,34 @@ type TextData struct {
 // lives in its parent's coordinate space.
 // Poly describes a regular shape inscribed in the node box.
 type Poly struct {
-	Kind  string `json:"kind"`             // triangle | polygon | star
+	Kind  string `json:"kind"`            // triangle | polygon | star
 	Sides int    `json:"sides,omitempty"` // polygon side count
 }
 
+type GradientStop struct {
+	Pos   float64 `json:"pos"`
+	Color string  `json:"color"`
+}
+
+type GradientFill struct {
+	Angle float64        `json:"angle"`
+	Stops []GradientStop `json:"stops"`
+}
+
 type Node struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Type        NodeType `json:"type"`
-	X           float64 `json:"x"`
-	Y           float64 `json:"y"`
-	Width       float64 `json:"width"`
-	Height      float64 `json:"height"`
-	Rotation    float64 `json:"rotation"` // degrees, clockwise
-	Opacity     float64 `json:"opacity"`
-	Visible     bool    `json:"visible"`
-	Locked      bool    `json:"locked"`
-	Fill         *string      `json:"fill"`
+	ID       string        `json:"id"`
+	Name     string        `json:"name"`
+	Type     NodeType      `json:"type"`
+	X        float64       `json:"x"`
+	Y        float64       `json:"y"`
+	Width    float64       `json:"width"`
+	Height   float64       `json:"height"`
+	Rotation float64       `json:"rotation"` // degrees, clockwise
+	Opacity  float64       `json:"opacity"`
+	Visible  bool          `json:"visible"`
+	Locked   bool          `json:"locked"`
+	Fill     *string       `json:"fill"`
+	Gradient *GradientFill `json:"gradient,omitempty"`
 	// FillVar/StrokeVar/TextVar name the color variable each color tracks.
 	FillVar      string       `json:"fillVar,omitempty"`
 	StrokeVar    string       `json:"strokeVar,omitempty"`
@@ -223,7 +233,7 @@ type Scene struct {
 	Background string  `json:"background"`
 	// BackgroundVar optionally names the color variable driving Background.
 	BackgroundVar string `json:"backgroundVar,omitempty"`
-	Nodes          []Node `json:"nodes"`
+	Nodes         []Node `json:"nodes"`
 }
 
 // ColorVariable is a named, reusable color stored on the document
@@ -243,6 +253,7 @@ type Document struct {
 	ID              string          `json:"id"`
 	Name            string          `json:"name"`
 	UpdatedAt       string          `json:"updatedAt"`
+	CreatedAt       string          `json:"createdAt,omitempty"`
 	SelectedSceneID string          `json:"selectedSceneId"`
 	Scenes          []Scene         `json:"scenes"`
 	Variables       []ColorVariable `json:"variables,omitempty"`

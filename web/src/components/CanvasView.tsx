@@ -325,6 +325,34 @@ export function CanvasView(props: Props) {
       }
       ctx.restore()
     }
+
+    // rulers, screen space, like Lunacy's default view
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    const R = 20
+    ctx.fillStyle = '#202020'
+    ctx.fillRect(0, 0, w, R)
+    ctx.fillRect(0, 0, R, h)
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'
+    ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(0, R + 0.5); ctx.lineTo(w, R + 0.5); ctx.moveTo(R + 0.5, 0); ctx.lineTo(R + 0.5, h); ctx.stroke()
+    const step = [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000].find((st) => st * viewport.zoom >= 48) ?? 2000
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'
+    ctx.font = '8px Inter, sans-serif'
+    ctx.textBaseline = 'top'
+    const wx0 = Math.floor((-viewport.panX) / viewport.zoom / step) * step
+    const wx1 = Math.ceil((w - viewport.panX) / viewport.zoom / step) * step
+    for (let x = wx0; x <= wx1; x += step) {
+      const sx = x * viewport.zoom + viewport.panX
+      ctx.fillRect(sx, R - 5, 1, 5)
+      ctx.fillText(String(x), sx + 3, 4)
+    }
+    const wy0 = Math.floor((-viewport.panY) / viewport.zoom / step) * step
+    const wy1 = Math.ceil((h - viewport.panY) / viewport.zoom / step) * step
+    for (let y = wy0; y <= wy1; y += step) {
+      const sy = y * viewport.zoom + viewport.panY
+      ctx.fillRect(R - 5, sy, 5, 1)
+      ctx.save(); ctx.translate(4, sy + 3); ctx.rotate(Math.PI / 2); ctx.fillText(String(y), 0, 0); ctx.restore()
+    }
   }, [scene, selectionIds, viewport, preview, tool, guides])
 
   // ---- wheel (zoom / pan), non-passive ----

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Check, Play, Redo2, Share2, Undo2, Upload } from 'lucide-react'
+import { Check, Gem, Play, Redo2, Share2, Undo2, Upload } from 'lucide-react'
 import type { Peer } from '../types'
 import { Logo } from './Logo'
 
@@ -13,6 +13,8 @@ interface Props {
   canRedo: boolean
   onImport: (f: File) => void
   onPlay: () => void
+  animMode: boolean
+  onAnimMode: () => void
   onHome: () => void
   zoom: number
   onZoomIn: () => void
@@ -74,6 +76,16 @@ export function TopBar(p: Props) {
       <BarBtn title="Preview (⇧⌘P)" onClick={p.onPlay}>
         <Play size={13} strokeWidth={1.8} />
       </BarBtn>
+      <button
+        title={p.animMode ? 'Exit animate mode' : 'Animate mode — keyframe timeline'}
+        onClick={p.onAnimMode}
+        className={`flex h-6 items-center gap-1 rounded-md px-2 text-[11px] transition-colors ${
+          p.animMode ? 'bg-sky-500/20 text-sky-300' : 'text-neutral-400 hover:bg-white/10 hover:text-neutral-100'
+        }`}
+      >
+        <Gem size={12} strokeWidth={1.8} />
+        Animate
+      </button>
 
       {/* zoom control */}
       <div className="relative">

@@ -11,6 +11,17 @@ export interface Stroke {
   width: number
 }
 
+export interface GradientStop {
+  pos: number // 0..1
+  color: string
+}
+
+/** Linear gradient fill. Angle in degrees, 0 = left→right, 90 = top→bottom. */
+export interface GradientFill {
+  angle: number
+  stops: GradientStop[]
+}
+
 export interface TextData {
   content: string
   fontSize: number
@@ -18,6 +29,7 @@ export interface TextData {
   color: string
   align: TextAlign
 }
+
 
 /** An icon from the built-in library (Lucide / Heroicons). */
 export interface IconData {
@@ -59,22 +71,25 @@ export type Trigger = 'view' | 'hover' | 'click' | 'loop'
 
 /** Anything that can be keyframed. */
 export type AnimProp =
+  | 'position'
+  | 'scale'
+  | 'rotation'
+  | 'opacity'
+  | 'fill'
+  | 'blur'
+  | 'shadow'
+  // legacy tracks from older documents
   | 'x'
   | 'y'
   | 'width'
   | 'height'
-  | 'rotation'
-  | 'opacity'
-  | 'scale'
-  | 'fill'
-  | 'blur'
   | 'brightness'
   | 'contrast'
   | 'saturation'
   | 'hue'
   | 'radius'
 
-export type KeyValue = number | string
+export type KeyValue = number | string | number[]
 
 /**
  * Legacy image adjustments. The editing UI for these CSS filters was
@@ -105,6 +120,8 @@ export interface Track {
   id: string
   property: AnimProp
   keys: Keyframe[]
+  /** stopwatch on — edits to this property write keyframes (After Effects style) */
+  armed?: boolean
 }
 
 /** A node's animation: tracks on a shared clock, started by a trigger. */
@@ -128,6 +145,8 @@ export interface Node {
   visible: boolean
   locked: boolean
   fill: string | null
+  /** linear gradient that overrides the solid fill (also tints text) */
+  gradient?: GradientFill | null
   /** ids of the color variable each color tracks (Figma-style variables) */
   fillVar?: string
   strokeVar?: string
@@ -170,6 +189,7 @@ export interface Document {
   id: string
   name: string
   updatedAt: string
+  createdAt?: string
   selectedSceneId: string
   scenes: Scene[]
   variables?: ColorVariable[]
@@ -187,15 +207,17 @@ export interface Peer {
 }
 
 export const ANIM_PROP_LABEL: Record<string, string> = {
+  position: 'Position',
+  scale: 'Scale',
+  rotation: 'Rotation',
+  opacity: 'Opacity',
+  fill: 'Fill',
+  blur: 'Blur',
+  shadow: 'Shadow',
   x: 'X',
   y: 'Y',
   width: 'Width',
   height: 'Height',
-  rotation: 'Rotation',
-  opacity: 'Opacity',
-  scale: 'Scale',
-  fill: 'Fill',
-  blur: 'Blur',
   brightness: 'Brightness',
   contrast: 'Contrast',
   saturation: 'Saturation',
@@ -203,9 +225,9 @@ export const ANIM_PROP_LABEL: Record<string, string> = {
   radius: 'Corner radius',
 }
 
-/** Properties offered in the "add track" menu, in a sensible order. */
+/** Properties offered in the timeline's add-track menu. */
 export const ANIM_PROPS: AnimProp[] = [
-  'x', 'y', 'width', 'height', 'rotation', 'scale', 'opacity', 'fill', 'radius',
+  'position', 'scale', 'rotation', 'opacity', 'fill', 'blur', 'shadow',
 ]
 
 export const TRIGGER_LABEL: Record<Trigger, string> = {

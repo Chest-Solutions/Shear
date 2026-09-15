@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Copy, Plus, Trash2, Upload } from 'lucide-react'
+import { Clock, Copy, FilePlus, FolderOpen, Search, Trash2 } from 'lucide-react'
 import type { Document, Scene } from '../types'
 import { deleteDocument, getDocument, listDocuments, saveDocument, type DocSummary } from '../api'
 import { drawScene } from '../render'
@@ -21,6 +21,7 @@ export function newDocument(): Document {
     id: uid(),
     name: 'Untitled',
     updatedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
     selectedSceneId: sceneId,
     scenes: [{ id: sceneId, name: 'Scene 1', width: 1440, height: 900, background: '#171717', nodes: [] }],
   }
@@ -32,6 +33,8 @@ export function newDocument(): Document {
  */
 export function HomePage({ onOpen, onCreate }: Props) {
   const [summaries, setSummaries] = useState<DocSummary[] | null>(null)
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<'recent' | 'az' | 'created'>('recent')
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const toastSeq = useRef(0)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -112,71 +115,84 @@ export function HomePage({ onOpen, onCreate }: Props) {
     }
   }
 
+  const shown = (summaries ?? [])
+    .filter((d) => !query || d.name.toLowerCase().includes(query.toLowerCase()))
+    .sort((a, b) =>
+      sort === 'az' ? a.name.localeCompare(b.name) : sort === 'created' ? (a.createdAt || a.updatedAt).localeCompare(b.createdAt || b.updatedAt) : b.updatedAt.localeCompare(a.updatedAt),
+    )
+
   return (
-    <div className="flex h-full flex-col bg-ink-800 text-neutral-200 antialiased select-none">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/5 bg-ink-925 px-4">
-        <div className="flex items-center gap-2.5">
+    <div className="flex h-full bg-ink-800 text-neutral-200 antialiased select-none">
+      {/* sidebar */}
+      <aside className="flex w-52 shrink-0 flex-col border-r border-white/5 bg-ink-925 px-3 py-4">
+        <div className="flex items-center gap-2 px-2">
           <Logo size={16} className="text-neutral-100" />
           <span className="text-[13px] font-semibold tracking-tight text-neutral-100">Shear</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".shear,.json,application/json"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) void importFile(f)
-              e.target.value = ''
-            }}
-          />
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="flex h-7 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[12px] text-neutral-300 transition-colors hover:bg-white/5 hover:text-neutral-100"
-          >
-            <Upload size={12} strokeWidth={2} />
-            Import .shear
-          </button>
-          <button
-            onClick={() => void create()}
-            className="flex h-7 items-center gap-1.5 rounded-md bg-white px-3 text-[12px] font-medium text-neutral-900 transition-colors hover:bg-neutral-200"
-          >
-            <Plus size={12} strokeWidth={2.4} />
-            New design
-          </button>
+        <nav className="mt-6 space-y-0.5">
+          <span className="flex items-center gap-2.5 rounded-md bg-white/10 px-2.5 py-1.5 text-[12px] text-neutral-100">
+            <Clock size={13} strokeWidth={1.8} /> Recent
+          </span>
+        </nav>
+        <div className="flex-1" />
+        <div className="space-y-1 border-t border-white/5 pt-3 text-[11px] text-neutral-500">
+          <a className="block px-2 py-1 transition-colors hover:text-neutral-200" href="https://github.com/Chest-Solutions/Shear" target="_blank" rel="noreferrer">Documentation</a>
+          <a className="block px-2 py-1 transition-colors hover:text-neutral-200" href="https://github.com/Chest-Solutions/Shear/releases" target="_blank" rel="noreferrer">What’s new?</a>
         </div>
-      </header>
+      </aside>
 
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-5xl px-6 py-8">
-          <div className="flex items-end justify-between">
-            <div>
-              <h1 className="text-[15px] font-semibold tracking-tight text-neutral-100">Your designs</h1>
-              <p className="mt-0.5 text-[12px] text-neutral-500">
-                {summaries === null
-                  ? 'Loading…'
-                  : summaries.length === 0
-                    ? 'Nothing here yet — start with a blank canvas.'
-                    : `${summaries.length} design${summaries.length === 1 ? '' : 's'}, most recent first.`}
-              </p>
-            </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* top bar: search + sort */}
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-white/5 px-5">
+          <div className="flex h-7 w-72 items-center gap-2 rounded-md border border-white/10 bg-white/5 px-2.5">
+            <Search size={12} strokeWidth={2} className="text-neutral-500" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search"
+              className="w-full bg-transparent text-[12px] text-neutral-200 outline-none placeholder:text-neutral-600"
+            />
           </div>
-
-          <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-3">
-            {/* new-design tile */}
+          <div className="flex-1" />
+          {(['recent', 'az', 'created'] as const).map((k) => (
             <button
-              onClick={() => void create()}
-              className="group flex aspect-[4/3] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 text-neutral-500 transition-all hover:border-white/30 hover:bg-white/[0.03] hover:text-neutral-200"
+              key={k}
+              onClick={() => setSort(k)}
+              className={`text-[11px] transition-colors ${sort === k ? 'font-semibold text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}
             >
-              <span className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 transition-colors group-hover:border-white/30">
-                <Plus size={16} strokeWidth={2} />
-              </span>
-              <span className="text-[12px]">New design</span>
+              {k === 'recent' ? 'Recent' : k === 'az' ? 'A–Z' : 'Created'}
             </button>
+          ))}
+        </header>
+
+        <main className="flex-1 overflow-y-auto px-5 py-5">
+          <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".shear,.json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) void importFile(f)
+                e.target.value = ''
+              }}
+            />
+            <ActionCard
+              icon={<FilePlus size={22} strokeWidth={1.6} className="text-sky-400" />}
+              title="New Local Document"
+              sub="Create a document on your computer"
+              onClick={() => void create()}
+            />
+            <ActionCard
+              icon={<FolderOpen size={22} strokeWidth={1.6} className="text-amber-400" />}
+              title="Open…"
+              sub="Import a .shear or .json file"
+              onClick={() => fileRef.current?.click()}
+            />
 
             <AnimatePresence initial={false}>
-              {(summaries ?? []).map((s) => (
+              {shown.map((s) => (
                 <motion.div
                   key={s.id}
                   layout
@@ -210,10 +226,25 @@ export function HomePage({ onOpen, onCreate }: Props) {
               ))}
             </AnimatePresence>
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
       <Toasts toasts={toasts} />
     </div>
+  )
+}
+
+function ActionCard({ icon, title, sub, onClick }: { icon: React.ReactNode; title: string; sub: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-3 rounded-xl border border-white/10 bg-ink-850 px-4 py-4 text-left transition-all hover:border-white/25 hover:bg-ink-800"
+    >
+      {icon}
+      <span>
+        <span className="block text-[12.5px] font-medium text-neutral-100">{title}</span>
+        <span className="mt-0.5 block text-[10.5px] text-neutral-500">{sub}</span>
+      </span>
+    </button>
   )
 }
 
