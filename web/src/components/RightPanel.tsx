@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { AlignCenter, AlignLeft, AlignRight, Copy, FlipHorizontal2, FlipVertical2, LockKeyhole, Unlock, X } from 'lucide-react'
+import { AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceBetween, AlignLeft, AlignRight, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceBetween, ChevronDown, Copy, Eye, EyeOff, FlipHorizontal2, FlipVertical2, LockKeyhole, Plus, Unlock, X } from 'lucide-react'
 import type { ColorVariable, Effect, Node, Scene, SceneFormat, TextAlign } from '../types'
 import { NODE_TYPE_LABEL } from '../types'
-import { defaultCornerRadii, uid } from '../utils'
+import { defaultCornerRadii } from '../utils'
 import { Slider } from './Timeline'
 import { GradientEditor } from './GradientEditor'
 import { highlightTSX } from './CodeHighlight'
@@ -25,6 +25,8 @@ interface Props {
   onUpdateScene: (patch: Partial<Scene>) => void
   onFlipH: () => void
   onFlipV: () => void
+  onAlign: (m: 'left' | 'centerH' | 'right' | 'top' | 'midV' | 'bottom') => void
+  onDistribute: (m: 'h' | 'v') => void
   lockAspect: boolean
   onLockAspect: (v: boolean) => void
   onExportScene: (fmt: SceneFormat) => void
@@ -92,11 +94,21 @@ function CodeTab({ scene }: { scene: Scene }) {
   )
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, right, defaultOpen = true }: { title: string; children: React.ReactNode; right?: React.ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className="border-b border-white/5 px-3 py-3">
-      <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">{title}</div>
-      <div className="space-y-2">{children}</div>
+    <div className="mx-2 mt-2 rounded-lg border border-white/5 bg-ink-850">
+      <div className="flex h-8 items-center justify-between pl-3 pr-2">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-neutral-400 transition-colors hover:text-neutral-200"
+        >
+          {title}
+          <ChevronDown size={10} strokeWidth={2} className={`transition-transform ${open ? '' : '-rotate-90'}`} />
+        </button>
+        <span className="flex items-center gap-0.5">{right}</span>
+      </div>
+      {open && <div className="space-y-2 px-3 pb-3">{children}</div>}
     </div>
   )
 }
@@ -131,6 +143,17 @@ function NodeProps(props: Props & { node: Node }) {
           spellCheck={false}
           className="mt-0.5 w-full truncate bg-transparent text-[13px] font-medium text-neutral-100 outline-none"
         />
+        <div className="mt-2 flex items-center gap-0.5 text-neutral-500">
+          <AlBtn title="Align left" onClick={() => props.onAlign('left')}><AlignStartVertical size={12} strokeWidth={1.8} /></AlBtn>
+          <AlBtn title="Align horizontal centers" onClick={() => props.onAlign('centerH')}><AlignCenterVertical size={12} strokeWidth={1.8} /></AlBtn>
+          <AlBtn title="Align right" onClick={() => props.onAlign('right')}><AlignEndVertical size={12} strokeWidth={1.8} /></AlBtn>
+          <AlBtn title="Align top" onClick={() => props.onAlign('top')}><AlignStartHorizontal size={12} strokeWidth={1.8} /></AlBtn>
+          <AlBtn title="Align vertical centers" onClick={() => props.onAlign('midV')}><AlignCenterHorizontal size={12} strokeWidth={1.8} /></AlBtn>
+          <AlBtn title="Align bottom" onClick={() => props.onAlign('bottom')}><AlignEndHorizontal size={12} strokeWidth={1.8} /></AlBtn>
+          <span className="mx-1 h-4 w-px bg-white/10" />
+          <AlBtn title="Distribute horizontally" onClick={() => props.onDistribute('h')}><AlignHorizontalSpaceBetween size={12} strokeWidth={1.8} /></AlBtn>
+          <AlBtn title="Distribute vertically" onClick={() => props.onDistribute('v')}><AlignVerticalSpaceBetween size={12} strokeWidth={1.8} /></AlBtn>
+        </div>
       </div>
 
       {/* size & position, flip, aspect lock — like Lunacy */}
@@ -161,15 +184,37 @@ function NodeProps(props: Props & { node: Node }) {
         {n.type === 'rect' && <CornerControls node={n} onUpdate={(patch) => props.onUpdateNode(n.id, patch)} />}
       </Section>
 
-      <Section title="Opacity">
-        <Slider
-          label="Opacity"
-          value={Math.round(n.opacity * 100)}
-          min={0}
-          max={100}
-          suffix="%"
-          onChange={(v) => props.onUpdateNode(n.id, { opacity: v / 100 })}
-        />
+      <Section title="Layer">
+        <div className="flex items-center gap-2">
+          <Slider
+            label="Opacity"
+            value={Math.round(n.opacity * 100)}
+            min={0}
+            max={100}
+            suffix="%"
+            onChange={(v) => props.onUpdateNode(n.id, { opacity: v / 100 })}
+          />
+          <select className="h-7 rounded-md border border-white/10 bg-white/5 px-1.5 text-[11px] text-neutral-300 outline-none [&>option]:bg-ink-900" defaultValue="normal">
+            <option value="normal">Normal</option>
+          </select>
+        </div>
+      </Section>
+
+      <Section title="Constraints" defaultOpen={false}>
+        <div className="grid grid-cols-2 gap-1.5">
+          <label className="flex h-7 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2">
+            <span className="text-[10px] text-neutral-500">H</span>
+            <select className="w-full bg-transparent text-[11px] text-neutral-300 outline-none [&>option]:bg-ink-900" defaultValue="scale">
+              <option value="scale">Scale</option>
+            </select>
+          </label>
+          <label className="flex h-7 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2">
+            <span className="text-[10px] text-neutral-500">V</span>
+            <select className="w-full bg-transparent text-[11px] text-neutral-300 outline-none [&>option]:bg-ink-900" defaultValue="scale">
+              <option value="scale">Scale</option>
+            </select>
+          </label>
+        </div>
       </Section>
 
       {n.type === 'icon' && n.icon && (
@@ -187,33 +232,34 @@ function NodeProps(props: Props & { node: Node }) {
       )}
 
       {(hasFill || n.type === 'text') && (
-        <Section title="Fill">
+        <Section
+          title="Fills"
+          right={
+            hasFill ? (
+              <HdrBtn title={n.gradient ? 'Back to solid' : 'Gradient fill'} onClick={() => props.onUpdateNode(n.id, { gradient: n.gradient ? null : { angle: 90, stops: [{ pos: 0, color: n.fill ?? '#ffffff' }, { pos: 1, color: '#000000' }] } })}>
+                <svg width="11" height="11" viewBox="0 0 10 10"><defs><linearGradient id="gp" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fff"/><stop offset="1" stopColor="#444"/></linearGradient></defs><rect width="10" height="10" rx="2" fill="url(#gp)"/></svg>
+              </HdrBtn>
+            ) : undefined
+          }
+        >
           {hasFill && (
             <div className="flex items-center gap-2">
-              <Toggle on={n.fill !== null || !!n.gradient} onToggle={() => props.onUpdateNode(n.id, { fill: n.fill === null && !n.gradient ? '#ffffff' : null, gradient: null, fillVar: n.fill === null ? undefined : undefined })} />
               <ColorField
-                value={n.fill ?? '#ffffff'}
+                value={n.gradient ? (n.gradient.stops[0]?.color ?? '#ffffff') : n.fill ?? '#ffffff'}
                 variableId={n.fillVar}
-                disabled={n.fill === null || !!n.gradient}
+                disabled={n.fill === null && !n.gradient}
                 variables={props.variables}
                 onCreateVariable={props.onCreateVariable}
                 onChange={(c, varId) => props.onUpdateNode(n.id, { fill: c, gradient: null, fillVar: varId })}
               />
-              <div className="flex-1" />
-              <button
-                title={n.gradient ? 'Back to solid color' : 'Gradient fill'}
-                onClick={() =>
-                  props.onUpdateNode(n.id, {
-                    gradient: n.gradient
-                      ? null
-                      : { angle: 90, stops: [{ pos: 0, color: n.fill ?? '#ffffff' }, { pos: 1, color: '#000000' }] },
-                  })
-                }
-                className={`flex h-6 items-center gap-1 rounded-md px-2 text-[10px] transition-colors ${n.gradient ? 'bg-white text-neutral-900' : 'bg-white/10 text-neutral-300 hover:bg-white/15'}`}
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10"><defs><linearGradient id="gp" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fff"/><stop offset="1" stopColor="#444"/></linearGradient></defs><rect width="10" height="10" rx="2" fill="url(#gp)"/></svg>
-                {n.gradient ? 'Gradient' : 'Solid'}
-              </button>
+              <span className="flex-1 truncate font-mono text-[11px] uppercase text-neutral-300">{(n.fill ?? 'D3D3D3').replace('#', '')}</span>
+              <span className="text-[10px] tabular-nums text-neutral-500">100%</span>
+              <HdrBtn title={n.fill === null && !n.gradient ? 'Show fill' : 'Hide fill'} onClick={() => props.onUpdateNode(n.id, { fill: n.fill === null && !n.gradient ? '#ffffff' : null, gradient: null })}>
+                {n.fill === null && !n.gradient ? <EyeOff size={11} strokeWidth={1.8} /> : <Eye size={11} strokeWidth={1.8} />}
+              </HdrBtn>
+              <HdrBtn title="Remove fill" onClick={() => props.onUpdateNode(n.id, { fill: null, gradient: null, fillVar: undefined })}>
+                <X size={11} strokeWidth={1.8} />
+              </HdrBtn>
             </div>
           )}
           {n.gradient && (
@@ -252,8 +298,31 @@ function NodeProps(props: Props & { node: Node }) {
         </div>
       </Section>
 
-      <Section title="Effects">
+      <Section
+        title="Effects"
+        right={
+          <HdrBtn title="Add effect" onClick={() => props.onUpdateNode(n.id, { effects: [...(n.effects ?? []), { id: Math.random().toString(36).slice(2), type: 'drop-shadow', visible: true, color: '#000000', x: 0, y: 4, blur: 4, spread: 0 }] })}>
+            <Plus size={11} strokeWidth={2} />
+          </HdrBtn>
+        }
+      >
         <EffectsControls node={n} onUpdate={(patch) => props.onUpdateNode(n.id, patch)} variables={props.variables} />
+      </Section>
+
+      <Section title="Prototyping" defaultOpen={false}>
+        <label className="flex h-7 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2">
+          <span className="text-[10px] text-neutral-500">Start</span>
+          <select
+            value={n.timeline?.trigger ?? 'view'}
+            onChange={(e) => props.onUpdateNode(n.id, { timeline: { duration: n.timeline?.duration ?? 2, loop: n.timeline?.loop ?? false, tracks: n.timeline?.tracks ?? [], trigger: e.target.value as never } })}
+            className="w-full bg-transparent text-[11px] text-neutral-300 outline-none [&>option]:bg-ink-900"
+          >
+            <option value="view">On view</option>
+            <option value="hover">On hover</option>
+            <option value="click">On click</option>
+            <option value="loop">Loop</option>
+          </select>
+        </label>
       </Section>
 
       {n.type === 'text' && n.text && (
@@ -421,6 +490,22 @@ function ExportTab(props: Props) {
   )
 }
 
+function AlBtn({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title: string }) {
+  return (
+    <button title={title} onClick={onClick} className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-white/10 hover:text-neutral-200">
+      {children}
+    </button>
+  )
+}
+
+function HdrBtn({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title: string }) {
+  return (
+    <button title={title} onClick={onClick} className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-white/10 hover:text-neutral-200">
+      {children}
+    </button>
+  )
+}
+
 function FlipBtn({ children, onClick, title, active }: { children: React.ReactNode; onClick: () => void; title: string; active?: boolean }) {
   return (
     <button
@@ -503,56 +588,59 @@ function EffectsControls({ node, onUpdate, variables }: { node: Node; onUpdate: 
   const effects = node.effects ?? []
   const update = (id: string, patch: Partial<Effect>) => onUpdate({ effects: effects.map((e) => (e.id === id ? ({ ...e, ...patch } as Effect) : e)) })
   const remove = (id: string) => onUpdate({ effects: effects.filter((e) => e.id !== id) })
-  const addShadow = () => onUpdate({ effects: [...effects, { id: uid(), type: 'drop-shadow', visible: true, color: '#000000', x: 0, y: 8, blur: 24, spread: 0 }] })
-  const addBlur = () => onUpdate({ effects: [...effects, { id: uid(), type: 'layer-blur', visible: true, blur: 4 }] })
+  const EFFECT_TYPES: { id: Effect['type']; label: string }[] = [
+    { id: 'drop-shadow', label: 'Shadow' },
+    { id: 'inner-shadow', label: 'Inner Shadow' },
+    { id: 'layer-blur', label: 'Gaussian Blur' },
+    { id: 'motion-blur', label: 'Motion Blur' },
+    { id: 'zoom-blur', label: 'Zoom Blur' },
+    { id: 'background-blur', label: 'Background Blur' },
+  ]
+  const setType = (e: Effect, t: Effect['type']) => {
+    const isBlur = t === 'layer-blur' || t === 'motion-blur' || t === 'zoom-blur' || t === 'background-blur'
+    if (isBlur) update(e.id, { type: t, blur: 'blur' in e ? e.blur : 4 } as Partial<Effect>)
+    else update(e.id, { type: t, color: 'color' in e ? e.color : '#000000', x: 'x' in e ? e.x : 0, y: 'y' in e ? e.y : 4, blur: 'blur' in e ? e.blur : 4, spread: 'spread' in e ? e.spread : 0 } as Partial<Effect>)
+  }
   return (
     <div className="space-y-2">
       {effects.map((e) => (
-        <div key={e.id} className="space-y-1.5 rounded-lg border border-white/10 bg-white/[0.03] p-2">
-          <div className="flex items-center gap-2">
-            <Toggle on={e.visible} onToggle={() => update(e.id, { visible: !e.visible })} />
+        <div key={e.id} className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
             <select
               value={e.type}
-              onChange={(ev) =>
-                update(
-                  e.id,
-                  ev.target.value === 'layer-blur' || ev.target.value === 'background-blur'
-                    ? ({ type: ev.target.value as 'layer-blur' | 'background-blur', blur: 'blur' in e ? e.blur : 4 } as Partial<Effect>)
-                    : ({ type: ev.target.value as 'drop-shadow' | 'inner-shadow', color: 'color' in e ? e.color : '#000000', x: 0, y: 8, blur: 'blur' in e ? e.blur : 24, spread: 0 } as Partial<Effect>),
-                )
-              }
-              className="min-w-0 flex-1 bg-transparent text-[11px] text-neutral-300 outline-none [&>option]:bg-ink-900"
+              onChange={(ev) => setType(e, ev.target.value as Effect['type'])}
+              className="h-7 min-w-0 flex-1 rounded-md border border-white/10 bg-white/5 px-1.5 text-[11px] text-neutral-200 outline-none [&>option]:bg-ink-900"
             >
-              <option value="drop-shadow">Drop shadow</option>
-              <option value="inner-shadow">Inner shadow</option>
-              <option value="layer-blur">Layer blur</option>
-              <option value="background-blur">Background blur</option>
+              {EFFECT_TYPES.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
             </select>
-            <button onClick={() => remove(e.id)} className="text-neutral-600 hover:text-neutral-200">
-              <X size={12} />
-            </button>
+            <HdrBtn title={e.visible ? 'Hide' : 'Show'} onClick={() => update(e.id, { visible: !e.visible })}>
+              {e.visible ? <Eye size={11} strokeWidth={1.8} /> : <EyeOff size={11} strokeWidth={1.8} />}
+            </HdrBtn>
+            <HdrBtn title="Remove" onClick={() => remove(e.id)}>
+              <X size={11} strokeWidth={1.8} />
+            </HdrBtn>
           </div>
           {'color' in e ? (
-            <div className="flex items-center gap-2">
-              <ColorField value={e.color} variables={variables} onChange={(c) => update(e.id, { color: c })} />
-              <NumField label="X" value={e.x} onChange={(v) => update(e.id, { x: v })} />
-              <NumField label="Y" value={e.y} onChange={(v) => update(e.id, { y: v })} />
-            </div>
-          ) : null}
-          {'spread' in e ? (
-            <div className="grid grid-cols-2 gap-1.5">
-              <NumField label="Blur" value={e.blur} min={0} onChange={(v) => update(e.id, { blur: v })} />
-              <NumField label="Spread" value={e.spread} onChange={(v) => update(e.id, { spread: v })} />
-            </div>
+            <>
+              <div className="grid grid-cols-3 gap-1.5">
+                <NumField label="X" value={e.x} onChange={(v) => update(e.id, { x: v })} />
+                <NumField label="Y" value={e.y} onChange={(v) => update(e.id, { y: v })} />
+                <NumField label="Blur" value={e.blur} min={0} onChange={(v) => update(e.id, { blur: v })} />
+              </div>
+              <div className="flex items-center gap-2">
+                <ColorField value={e.color} variables={variables} onChange={(c) => update(e.id, { color: c })} />
+                <span className="flex-1 truncate font-mono text-[11px] uppercase text-neutral-400">{e.color.replace('#', '')}</span>
+                {'spread' in e && <NumField label="Spread" value={e.spread} onChange={(v) => update(e.id, { spread: v })} />}
+              </div>
+            </>
           ) : (
             <Slider label="Blur" value={e.blur} min={0} max={80} onChange={(v) => update(e.id, { blur: v })} />
           )}
         </div>
       ))}
-      <div className="flex gap-1.5">
-        <button onClick={addShadow} className="rounded-md bg-white/10 px-2 py-1 text-[11px] hover:bg-white/15">+ Shadow</button>
-        <button onClick={addBlur} className="rounded-md bg-white/10 px-2 py-1 text-[11px] hover:bg-white/15">+ Blur</button>
-      </div>
+      {effects.length === 0 && <p className="text-[10px] text-neutral-600">No effects yet — add one with +.</p>}
     </div>
   )
 }

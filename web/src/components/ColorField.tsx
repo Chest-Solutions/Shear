@@ -160,7 +160,7 @@ export function ColorField({ value, variableId, variables, onChange, onCreateVar
           <div
             ref={svRef}
             onPointerDown={dragSV}
-            className="relative h-28 w-full cursor-crosshair rounded-lg ring-1 ring-white/10"
+            className="relative h-40 w-full cursor-crosshair rounded-md ring-1 ring-white/10"
             style={{
               background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${h},100%,50%))`,
             }}
@@ -190,6 +190,7 @@ export function ColorField({ value, variableId, variables, onChange, onCreateVar
           </div>
 
           <div className="mt-2.5 flex items-center gap-2">
+            <span className="text-[10px] text-neutral-500">Hex</span>
             <input
               value={value}
               spellCheck={false}
@@ -204,6 +205,19 @@ export function ColorField({ value, variableId, variables, onChange, onCreateVar
               className="h-7 w-full rounded-md border border-white/10 bg-white/5 px-2 font-mono text-[11px] uppercase text-neutral-200 outline-none focus:border-white/30"
             />
           </div>
+
+          {onCreateVariable && (
+            <button
+              onClick={() => {
+                const v2: ColorVariable = { id: uid(), name: `Color ${variables.length + 1}`, color: value }
+                onCreateVariable(v2)
+                onChange(value, v2.id)
+              }}
+              className="mt-3 w-full rounded-md border border-white/15 py-1.5 text-[11px] text-neutral-200 transition-colors hover:bg-white/10"
+            >
+              Create Color Variable
+            </button>
+          )}
 
           <div className="mt-3 flex items-center justify-between">
             <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">Variables</span>

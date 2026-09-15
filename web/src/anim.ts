@@ -341,14 +341,6 @@ export function adjustCSS(a: Adjust | undefined): string {
 
 // ---------------------------------------------------------------- auto-key
 
-const PROP_OF_ADJUST: Record<string, AnimProp> = {
-  blur: 'blur',
-  brightness: 'brightness',
-  contrast: 'contrast',
-  saturation: 'saturation',
-  hue: 'hue',
-}
-
 export function upsertKey(track: Track, time: number, value: KeyValue): Track {
   const at = track.keys.find((k) => Math.abs(k.time - time) < 0.02)
   if (at) {
@@ -372,41 +364,44 @@ export function syncKeyframes(before: Node, after: Node, time: number): Node {
 
   let tracks = tl.tracks
   let changed = false
+  const out: Node = { ...after }
   const upsert = (prop: AnimProp, value: KeyValue) => {
     const i = tracks.findIndex((t) => t.property === prop)
     // keyframing only happens while the property's stopwatch is armed
-    if (i === -1 || !tracks[i].armed) return
+    if (i === -1 || !tracks[i].armed) return false
     tracks = tracks.map((t, j) => (j === i ? upsertKey(t, time, value) : t))
     changed = true
+    return true
   }
 
-  // position: x/y edits land on a single Position track
-  if (after.x !== before.x || after.y !== before.y) upsert('position', [after.x, after.y])
-  // scale: width/height edits become a scale factor around the base size
-  if (after.width !== before.width || after.height !== before.height) {
-    upsert('scale', Math.round((after.width / Math.max(1, before.width)) * 1000) / 1000)
+  // While an armed track records the edit, the BASE value holds still —
+  // the keyframe owns the new value, exactly like After Effects.
+  if (after.x !== before.x || after.y !== before.y) {
+    if (upsert('position', [after.x, after.y])) { out.x = before.x; out.y = before.y }
   }
-  if (after.rotation !== before.rotation) upsert('rotation', after.rotation)
-  if (after.opacity !== before.opacity) upsert('opacity', after.opacity)
-  if (after.fill !== before.fill) upsert('fill', after.fill ?? '#ffffff')
-  if ((after.cornerRadius ?? 0) !== (before.cornerRadius ?? 0)) upsert('radius', after.cornerRadius ?? 0)
+  if (after.width !== before.width || after.height !== before.height) {
+    if (upsert('scale', Math.round((after.width / Math.max(1, before.width)) * 1000) / 1000)) {
+      out.width = before.width; out.height = before.height
+    }
+  }
+  if (after.rotation !== before.rotation && upsert('rotation', after.rotation)) out.rotation = before.rotation
+  if (after.opacity !== before.opacity && upsert('opacity', after.opacity)) out.opacity = before.opacity
+  if (after.fill !== before.fill && upsert('fill', after.fill ?? '#ffffff')) out.fill = before.fill
+  if ((after.cornerRadius ?? 0) !== (before.cornerRadius ?? 0) && upsert('radius', after.cornerRadius ?? 0))
+    out.cornerRadius = before.cornerRadius
 
   const ba = { ...defaultAdjust(), ...(before.adjust ?? {}) }
   const aa = { ...defaultAdjust(), ...(after.adjust ?? {}) }
-  if (aa.blur !== ba.blur) upsert('blur', aa.blur)
-  for (const [field, prop] of Object.entries(PROP_OF_ADJUST)) {
-    if (prop === 'blur') continue
-    const b = (ba as unknown as Record<string, number>)[field]
-    const a = (aa as unknown as Record<string, number>)[field]
-    if (a !== b) upsert(prop, a)
-  }
-
-  // shadow effect edits
+  if (aa.blur !== ba.blur && upsert('blur', aa.blur)) out.adjust = { ...aa, blur: ba.blur }
   const bs = shadowOf(before)
   const as2 = shadowOf(after)
-  if (as2.x !== bs.x || as2.y !== bs.y || as2.blur !== bs.blur) upsert('shadow', [as2.x, as2.y, as2.blur])
+  if ((as2.x !== bs.x || as2.y !== bs.y || as2.blur !== bs.blur) && upsert('shadow', [as2.x, as2.y, as2.blur])) {
+    out.effects = (out.effects ?? []).map((ef) =>
+      ef.type === 'drop-shadow' ? { ...ef, x: bs.x, y: bs.y, blur: bs.blur } : ef,
+    )
+  }
 
-  return changed ? { ...after, timeline: { ...tl, tracks } } : after
+  return changed ? { ...out, timeline: { ...tl, tracks } } : after
 }
 
 /** Apply syncKeyframes across two versions of a node tree. */

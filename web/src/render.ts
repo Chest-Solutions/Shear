@@ -73,7 +73,7 @@ function getIconImage(n: Node): HTMLImageElement | null {
 
 function filters(n: Node): string {
   const parts: string[] = []
-  for (const e of n.effects ?? []) if (e.visible && e.type === 'layer-blur' && e.blur > 0) parts.push(`blur(${e.blur}px)`)
+  for (const e of n.effects ?? []) if (e.visible && (e.type === 'layer-blur' || e.type === 'motion-blur' || e.type === 'zoom-blur') && e.blur > 0) parts.push(`blur(${e.blur}px)`)
   const adj = adjustCSS(n.adjust)
   if (adj) parts.push(adj)
   return parts.join(' ') || 'none'

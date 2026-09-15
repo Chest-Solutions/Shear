@@ -9,6 +9,7 @@ import {
   MousePointer2,
   Sparkles,
   Square,
+  Star,
   Triangle,
   Type,
 } from 'lucide-react'
@@ -18,23 +19,35 @@ interface Props {
   tool: Tool
   rectVar: 'rect' | 'rounded'
   lineVar: 'line' | 'arrow'
-  ovalVar: 'ellipse' | 'triangle' | 'polygon'
+  ovalVar: 'ellipse' | 'triangle' | 'polygon' | 'star'
   onRect: (v: 'rect' | 'rounded') => void
   onLine: (v: 'line' | 'arrow') => void
-  onOval: (v: 'ellipse' | 'triangle' | 'polygon') => void
+  onOval: (v: 'ellipse' | 'triangle' | 'polygon' | 'star') => void
   onTool: (t: Tool) => void
   /** horizontal offset in px (clears the left rail / panel) */
   left: number
 }
 
-type ShapeId = 'rect' | 'rounded' | 'ellipse' | 'triangle' | 'polygon' | 'line' | 'arrow'
+const shapeIcon = (id: string, size = 14) => {
+  switch (id) {
+    case 'rect': return <Square size={size} strokeWidth={1.8} />
+    case 'rounded': return <RoundedRectIcon />
+    case 'ellipse': return <Circle size={size} strokeWidth={1.8} />
+    case 'triangle': return <Triangle size={size} strokeWidth={1.8} />
+    case 'polygon': return <Hexagon size={size} strokeWidth={1.8} />
+    case 'star': return <Star size={size} strokeWidth={1.8} />
+    case 'line': return <Minus size={size} strokeWidth={1.8} />
+    case 'arrow': return <ArrowUpRight size={size} strokeWidth={1.8} />
+    default: return <Square size={size} strokeWidth={1.8} />
+  }
+}
 
 /**
- * New-Lunacy floating vertical toolbar. Shape and line tools collapse
- * into groups whose flyouts open on hover.
+ * Lunacy's floating vertical toolbar. Grouped tools open a horizontal
+ * flyout on hover; the group button shows the currently selected member.
  */
 export function VerticalToolbar(p: Props) {
-  const currentShape: ShapeId =
+  const shape: string =
     p.tool === 'rect' ? p.rectVar : p.tool === 'line' ? p.lineVar : p.tool === 'ellipse' ? p.ovalVar : 'rect'
 
   return (
@@ -46,32 +59,29 @@ export function VerticalToolbar(p: Props) {
         <MousePointer2 size={15} strokeWidth={1.8} />
       </ToolBtn>
 
-      <Flyout label="Shapes" active={p.tool === 'rect' || p.tool === 'ellipse'}>
-        <FlyItem current={currentShape === 'rect'} title="Rectangle — R" onClick={() => p.onRect('rect')}>
-          <Square size={14} strokeWidth={1.8} />
-        </FlyItem>
-        <FlyItem current={currentShape === 'rounded'} title="Rounded rectangle" onClick={() => p.onRect('rounded')}>
-          <RoundedRectIcon />
-        </FlyItem>
-        <FlyItem current={currentShape === 'ellipse'} title="Oval — O" onClick={() => p.onOval('ellipse')}>
-          <Circle size={14} strokeWidth={1.8} />
-        </FlyItem>
-        <FlyItem current={currentShape === 'triangle'} title="Triangle" onClick={() => p.onOval('triangle')}>
-          <Triangle size={14} strokeWidth={1.8} />
-        </FlyItem>
-        <FlyItem current={currentShape === 'polygon'} title="Polygon" onClick={() => p.onOval('polygon')}>
-          <Hexagon size={14} strokeWidth={1.8} />
-        </FlyItem>
-      </Flyout>
+      <Flyout
+        active={p.tool === 'rect' || p.tool === 'ellipse'}
+        main={shapeIcon(shape)}
+        items={[
+          { id: 'ellipse', title: 'Oval — O', on: () => p.onOval('ellipse') },
+          { id: 'rect', title: 'Rectangle — R', on: () => p.onRect('rect') },
+          { id: 'rounded', title: 'Rounded Rectangle — R,R', on: () => p.onRect('rounded') },
+          { id: 'triangle', title: 'Triangle', on: () => p.onOval('triangle') },
+          { id: 'polygon', title: 'Polygon', on: () => p.onOval('polygon') },
+          { id: 'star', title: 'Star', on: () => p.onOval('star') },
+        ]}
+        current={shape}
+      />
 
-      <Flyout label="Lines" active={p.tool === 'line'}>
-        <FlyItem current={currentShape === 'line'} title="Line — L" onClick={() => p.onLine('line')}>
-          <Minus size={14} strokeWidth={1.8} />
-        </FlyItem>
-        <FlyItem current={currentShape === 'arrow'} title="Arrow" onClick={() => p.onLine('arrow')}>
-          <ArrowUpRight size={14} strokeWidth={1.8} />
-        </FlyItem>
-      </Flyout>
+      <Flyout
+        active={p.tool === 'line'}
+        main={shapeIcon(shape)}
+        items={[
+          { id: 'line', title: 'Line — L', on: () => p.onLine('line') },
+          { id: 'arrow', title: 'Arrow — L,L', on: () => p.onLine('arrow') },
+        ]}
+        current={shape}
+      />
 
       <ToolBtn active={p.tool === 'text'} title="Text — T" onClick={() => p.onTool('text')}>
         <Type size={15} strokeWidth={1.8} />
@@ -86,46 +96,46 @@ export function VerticalToolbar(p: Props) {
   )
 }
 
-function Flyout({ label, active, children }: { label: string; active?: boolean; children: React.ReactNode }) {
+function Flyout({
+  active,
+  main,
+  items,
+  current,
+}: {
+  active?: boolean
+  main: React.ReactNode
+  items: { id: string; title: string; on: () => void }[]
+  current: string
+}) {
   const [open, setOpen] = useState(false)
   return (
     <div className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
       <button
-        title={label}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => items.find((i) => i.id === current)?.on()}
         className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
           active ? 'bg-white/15 text-white' : 'text-neutral-400 hover:bg-white/10 hover:text-neutral-100'
         }`}
       >
-        {children && <FirstChild>{children}</FirstChild>}
+        {main}
         <ChevronRight size={8} strokeWidth={2} className="absolute bottom-1 right-1 text-neutral-600" />
       </button>
       {open && (
-        <div className="absolute left-9 top-0 z-40 flex flex-col gap-0.5 rounded-xl border border-white/10 bg-ink-900/95 p-1 shadow-panel backdrop-blur-xl">
-          {children}
+        <div className="absolute left-9 top-0 z-40 flex flex-row gap-0.5 rounded-xl border border-white/10 bg-ink-900/95 p-1 shadow-panel backdrop-blur-xl">
+          {items.map((it) => (
+            <button
+              key={it.id}
+              title={it.title}
+              onClick={it.on}
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                current === it.id ? 'bg-sky-500 text-white' : 'text-neutral-400 hover:bg-white/10 hover:text-neutral-100'
+              }`}
+            >
+              {shapeIcon(it.id)}
+            </button>
+          ))}
         </div>
       )}
     </div>
-  )
-}
-
-/** the group button shows the first tool of the flyout */
-function FirstChild({ children }: { children: React.ReactNode }) {
-  const arr = Array.isArray(children) ? children : [children]
-  return <>{arr[0] ? (arr[0] as React.ReactElement).props.children ?? null : null}</>
-}
-
-function FlyItem({ current, title, onClick, children }: { current: boolean; title: string; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      title={title}
-      onClick={onClick}
-      className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-        current ? 'bg-white/15 text-white' : 'text-neutral-400 hover:bg-white/10 hover:text-neutral-100'
-      }`}
-    >
-      {children}
-    </button>
   )
 }
 

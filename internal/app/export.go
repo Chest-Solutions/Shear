@@ -51,7 +51,7 @@ func svgNode(body, defs *strings.Builder, n Node, ctr *int) {
 			filters = append(filters, fmt.Sprintf(
 				`<feDropShadow dx="%s" dy="%s" stdDeviation="%s" flood-color="%s"/>`,
 				num(e.X), num(e.Y), num(e.Blur/2), attr(e.Color)))
-		case "layer-blur":
+		case "layer-blur", "motion-blur", "zoom-blur":
 			filters = append(filters, fmt.Sprintf(`<feGaussianBlur stdDeviation="%s"/>`, num(e.Blur/2)))
 		}
 	}
@@ -614,7 +614,7 @@ func cssFilter(n Node) string {
 		}
 	}
 	for _, e := range n.Effects {
-		if e.Visible && e.Type == "layer-blur" && e.Blur > 0 {
+		if e.Visible && (e.Type == "layer-blur" || e.Type == "motion-blur" || e.Type == "zoom-blur") && e.Blur > 0 {
 			out = append(out, fmt.Sprintf("blur(%spx)", num(e.Blur)))
 		}
 	}

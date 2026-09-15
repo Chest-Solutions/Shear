@@ -29,7 +29,7 @@ function shadowCSS(n: Node): string {
 }
 
 function layerBlur(n: Node): number {
-  const e = (n.effects ?? []).find((x) => x.visible && x.type === 'layer-blur')
+  const e = (n.effects ?? []).find((x) => x.visible && (x.type === 'layer-blur' || x.type === 'motion-blur' || x.type === 'zoom-blur'))
   return e && 'blur' in e ? e.blur : 0
 }
 

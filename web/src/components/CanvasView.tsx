@@ -267,10 +267,10 @@ export function CanvasView(props: Props) {
         if (node.type === 'rect' && node.width > 20 && node.height > 20) {
           const rs = cornerRadii(node)
           const cornerPts = [
-            { id: 'tl', x: rs.tl, y: rs.tl },
-            { id: 'tr', x: node.width - rs.tr, y: rs.tr },
-            { id: 'br', x: node.width - rs.br, y: node.height - rs.br },
-            { id: 'bl', x: rs.bl, y: node.height - rs.bl },
+            { id: 'tl', x: cornerInset(rs.tl), y: cornerInset(rs.tl) },
+            { id: 'tr', x: node.width - cornerInset(rs.tr), y: cornerInset(rs.tr) },
+            { id: 'br', x: node.width - cornerInset(rs.br), y: node.height - cornerInset(rs.br) },
+            { id: 'bl', x: cornerInset(rs.bl), y: node.height - cornerInset(rs.bl) },
           ] as const
           for (const cp of cornerPts) {
             const p = applyMat(world, cp.x, cp.y)
@@ -324,6 +324,37 @@ export function CanvasView(props: Props) {
         }
       }
       ctx.restore()
+    }
+
+    // size badge under the selection, like Lunacy's blue pill
+    if (selectionIds.length > 0) {
+      const worlds = nodeWorlds(scene.nodes).filter((x) => selectionIds.includes(x.node.id))
+      if (worlds.length) {
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+        for (const { node, world } of worlds) {
+          for (const cp of [applyMat(world, 0, 0), applyMat(world, node.width, 0), applyMat(world, node.width, node.height), applyMat(world, 0, node.height)]) {
+            x0 = Math.min(x0, cp.x); y0 = Math.min(y0, cp.y); x1 = Math.max(x1, cp.x); y1 = Math.max(y1, cp.y)
+          }
+        }
+        const sx0 = x0 * viewport.zoom + viewport.panX
+        const sy1 = y1 * viewport.zoom + viewport.panY
+        const label = `${Math.round(x1 - x0)} × ${Math.round(y1 - y0)}`
+        ctx.font = '600 10px Inter, sans-serif'
+        const tw = ctx.measureText(label).width
+        const bw = tw + 14
+        const bh = 18
+        const bx = sx0 + ((x1 - x0) * viewport.zoom) / 2 - bw / 2
+        const by = sy1 + 10
+        ctx.fillStyle = '#2d7dff'
+        ctx.beginPath()
+        ctx.roundRect(bx, by, bw, bh, 4)
+        ctx.fill()
+        ctx.fillStyle = '#ffffff'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(label, bx + bw / 2, by + bh / 2 + 0.5)
+        ctx.textAlign = 'left'
+      }
     }
 
     // rulers, screen space, like Lunacy's default view
@@ -430,16 +461,18 @@ export function CanvasView(props: Props) {
     return nearX && nearY && !inside
   }
 
+  const cornerInset = (r: number) => Math.max(r, 14 / viewport.zoom)
+
   const cornerHit = (wpt: { x: number; y: number }): CornerId | null => {
     if (selectionIds.length !== 1) return null
     const hit = selectedWorld()
     if (!hit || hit.node.type !== 'rect') return null
     const rs = cornerRadii(hit.node)
     const pts: { id: CornerId; x: number; y: number }[] = [
-      { id: 'tl', x: rs.tl, y: rs.tl },
-      { id: 'tr', x: hit.node.width - rs.tr, y: rs.tr },
-      { id: 'br', x: hit.node.width - rs.br, y: hit.node.height - rs.br },
-      { id: 'bl', x: rs.bl, y: hit.node.height - rs.bl },
+      { id: 'tl', x: cornerInset(rs.tl), y: cornerInset(rs.tl) },
+      { id: 'tr', x: hit.node.width - cornerInset(rs.tr), y: cornerInset(rs.tr) },
+      { id: 'br', x: hit.node.width - cornerInset(rs.br), y: hit.node.height - cornerInset(rs.br) },
+      { id: 'bl', x: cornerInset(rs.bl), y: hit.node.height - cornerInset(rs.bl) },
     ]
     const r = 8 / viewport.zoom
     for (const c of pts) {
@@ -705,6 +738,11 @@ export function CanvasView(props: Props) {
           else w = (w < 0 ? -1 : 1) * (Math.abs(h) * ar)
           if (hd.includes('w')) x = n0.x + n0.w - w
           if (hd.includes('n')) y = n0.y + n0.h - h
+        }
+        // Alt anchors the resize at the centre, like Lunacy/Photoshop
+        if (e.altKey) {
+          x = n0.x + n0.w / 2 - w / 2
+          y = n0.y + n0.h / 2 - h / 2
         }
         // line: crossing the anchor flips the direction
         if (hd.includes('w') && w < 0) {

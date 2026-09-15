@@ -60,7 +60,7 @@ export interface ShadowEffect {
 
 export interface BlurEffect {
   id: string
-  type: 'layer-blur' | 'background-blur'
+  type: 'layer-blur' | 'background-blur' | 'motion-blur' | 'zoom-blur'
   visible: boolean
   blur: number
 }

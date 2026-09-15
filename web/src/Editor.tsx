@@ -9,7 +9,7 @@ import { TopBar, PresencePill } from './components/TopBar'
 import { VerticalToolbar } from './components/VerticalToolbar'
 import { TimelineBar } from './components/TimelineBar'
 import { reactProjectZip } from './reactProject'
-import { LeftPanel } from './components/LeftPanel'
+import { LeftPanel, type LeftTab } from './components/LeftPanel'
 import { RightPanel } from './components/RightPanel'
 import { CanvasView, findAny } from './components/CanvasView'
 import { PreviewOverlay } from './components/PreviewOverlay'
@@ -38,10 +38,10 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
   const [tool, setTool] = useState<Tool>('select')
   const [rectVar, setRectVar] = useState<RectVariant>('rect')
   const [lineVar, setLineVar] = useState<LineVariant>('line')
-  const [ovalVar, setOvalVar] = useState<'ellipse' | 'triangle' | 'polygon'>('ellipse')
+  const [ovalVar, setOvalVar] = useState<'ellipse' | 'triangle' | 'polygon' | 'star'>('ellipse')
   const [animMode, setAnimMode] = useState(false)
   const [stamp, setStamp] = useState<{ svg: string; color: string; name: string } | null>(null)
-  const [leftTab, setLeftTab] = useState<'layers' | 'icons'>('layers')
+  const [leftTab, setLeftTab] = useState<LeftTab>('layers')
   const [rightTab, setRightTab] = useState<'design' | 'export' | 'code'>('design')
   const [leftOpen, setLeftOpen] = useState(true)
   const [lockAspect, setLockAspect] = useState(false)
@@ -1082,6 +1082,10 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
           onDeleteScene={deleteScene}
           onPickIcon={pickIcon}
           stampArmed={!!stamp}
+          variables={variables}
+          onVariables={setVariables}
+          variableUsage={variableUsage}
+          onCreateVariable={createVariable}
         />
 
         <VerticalToolbar
@@ -1133,6 +1137,8 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
           onUpdateScene={updateSceneProps}
           onFlipH={() => flipSelection('h')}
           onFlipV={() => flipSelection('v')}
+          onAlign={alignSelection}
+          onDistribute={distributeSelection}
           lockAspect={lockAspect}
           onLockAspect={setLockAspect}
           onExportScene={(fmt) => void doExportScene(currentSceneId, fmt)}
