@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 afterEach(cleanup)
-import type { Document, Node, Scene } from '../types'
+import type { Node, Scene } from '../types'
 import { ColorField } from '../components/ColorField'
 import { RightPanel } from '../components/RightPanel'
 import { TimelineBar } from '../components/TimelineBar'
