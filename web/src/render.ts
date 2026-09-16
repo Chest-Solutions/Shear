@@ -1,5 +1,6 @@
 import type { CornerRadii, Node, Scene } from './types'
 import { adjustCSS } from './anim'
+import { withAlpha } from './utils'
 import { arrowHead, lineEnds, polyPoints } from './utils'
 
 export interface Viewport {
@@ -261,7 +262,7 @@ export function drawNode(ctx: CanvasRenderingContext2D, n: Node) {
   for (const e of n.effects ?? []) {
     if (!e.visible || (e.type !== 'drop-shadow' && e.type !== 'inner-shadow')) continue
     ctx.save()
-    ctx.shadowColor = e.color
+    ctx.shadowColor = withAlpha(e.color, e.opacity ?? 1)
     ctx.shadowBlur = Math.max(0, e.blur)
     ctx.shadowOffsetX = e.x
     ctx.shadowOffsetY = e.y

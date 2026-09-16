@@ -5,6 +5,9 @@ import { ANIM_PROPS, ANIM_PROP_LABEL } from '../types'
 import { currentValue, makeKey, sortKeys, timelineLength } from '../anim'
 
 interface Props {
+  /** screen-space bounds: the timeline lives between the side panels */
+  left: number
+  right: number
   node: Node | null
   time: number
   playing: boolean
@@ -152,7 +155,7 @@ export function TimelineBar(p: Props) {
   for (let t = 0; t <= length + 6; t += grid) ticks.push(Math.round(t * 100) / 100)
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-[5] border-t border-white/10 bg-ink-900/95 backdrop-blur-xl">
+    <div className="absolute bottom-0 z-[5] border-t border-white/10 bg-[#1f1f1f]" style={{ left: p.left, right: p.right }}>
       {/* header strip */}
       <div className="flex h-8 items-center gap-2 border-b border-white/5 px-3">
         <Gem size={12} strokeWidth={1.8} className="text-sky-400" />
@@ -201,7 +204,7 @@ export function TimelineBar(p: Props) {
             return (
               <div key={prop} style={{ height: ROW }} className="flex items-center gap-1.5 px-3">
                 <button
-                  title={tr?.armed ? 'Recording — edits write keyframes' : 'Arm stopwatch to animate'}
+                  title={tr?.armed ? `Recording ${ANIM_PROP_LABEL[prop]} — edits write keyframes` : `Arm ${ANIM_PROP_LABEL[prop]} stopwatch`}
                   onClick={() => toggleStopwatch(prop)}
                   className={`flex h-5 w-5 items-center justify-center rounded transition-colors ${tr?.armed ? 'text-sky-400' : 'text-neutral-600 hover:text-neutral-300'}`}
                 >

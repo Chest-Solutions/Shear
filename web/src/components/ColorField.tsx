@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Plus, Unlink } from 'lucide-react'
 import type { ColorVariable } from '../types'
 import { uid } from '../utils'
@@ -149,10 +150,11 @@ export function ColorField({ value, variableId, variables, onChange, onCreateVar
         {bound && <span className="absolute bottom-0 right-0 h-2 w-2 rounded-tl bg-white ring-1 ring-black/40" title={`Variable: ${bound.name}`} />}
       </button>
 
-      {open && (
+      {open &&
+        createPortal(
         <div
           ref={popRef}
-          className="fixed z-50 w-60 rounded-xl border border-white/10 bg-ink-925/95 p-3 shadow-panel backdrop-blur-2xl"
+          className="fixed z-50 w-60 rounded-xl border border-white/10 bg-ink-925 p-3 shadow-panel"
           style={{ left: pos.x, top: pos.y }}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -261,8 +263,9 @@ export function ColorField({ value, variableId, variables, onChange, onCreateVar
               Detach from “{bound.name}”
             </button>
           )}
-        </div>
-      )}
+        </div>,
+        document.body,
+        )}
     </>
   )
 }

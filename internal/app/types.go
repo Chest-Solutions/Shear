@@ -58,6 +58,7 @@ type Effect struct {
 	Type    string  `json:"type"`
 	Visible bool    `json:"visible"`
 	Color   string  `json:"color,omitempty"`
+	Opacity float64 `json:"opacity,omitempty"`
 	X       float64 `json:"x,omitempty"`
 	Y       float64 `json:"y,omitempty"`
 	Blur    float64 `json:"blur"`

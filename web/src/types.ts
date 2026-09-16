@@ -52,6 +52,8 @@ export interface ShadowEffect {
   type: 'drop-shadow' | 'inner-shadow'
   visible: boolean
   color: string
+  /** 0..1, defaults to 1 */
+  opacity?: number
   x: number
   y: number
   blur: number

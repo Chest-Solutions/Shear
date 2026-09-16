@@ -219,7 +219,7 @@ export function CanvasView(props: Props) {
     if (!ctx) return
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
-    ctx.fillStyle = '#1b1b1b'
+    ctx.fillStyle = '#333333'
     ctx.fillRect(0, 0, w, h)
     ctx.translate(viewport.panX, viewport.panY)
     ctx.scale(viewport.zoom, viewport.zoom)

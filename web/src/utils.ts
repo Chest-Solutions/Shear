@@ -184,3 +184,14 @@ export function nextName(nodes: Node[], type: NodeType): string {
   walk(nodes)
   return `${label} ${max + 1}`
 }
+
+/** hex color + 0..1 alpha → #rrggbbaa (omitted when fully opaque) */
+export function withAlpha(hex: string, alpha: number): string {
+  if (alpha >= 1) return hex
+  const a = Math.max(0, Math.min(255, Math.round(alpha * 255)))
+    .toString(16)
+    .padStart(2, '0')
+  const h = hex.startsWith('#') ? hex.slice(1) : hex
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6)
+  return `#${full}${a}`
+}

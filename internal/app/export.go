@@ -49,8 +49,8 @@ func svgNode(body, defs *strings.Builder, n Node, ctr *int) {
 		switch e.Type {
 		case "drop-shadow":
 			filters = append(filters, fmt.Sprintf(
-				`<feDropShadow dx="%s" dy="%s" stdDeviation="%s" flood-color="%s"/>`,
-				num(e.X), num(e.Y), num(e.Blur/2), attr(e.Color)))
+				`<feDropShadow dx="%s" dy="%s" stdDeviation="%s" flood-color="%s" flood-opacity="%s"/>`,
+				num(e.X), num(e.Y), num(e.Blur/2), attr(e.Color), num(shOpacity(e))))
 		case "layer-blur", "motion-blur", "zoom-blur":
 			filters = append(filters, fmt.Sprintf(`<feGaussianBlur stdDeviation="%s"/>`, num(e.Blur/2)))
 		}
@@ -571,9 +571,9 @@ func cssShadows(n Node) string {
 		}
 		switch e.Type {
 		case "drop-shadow":
-			out = append(out, fmt.Sprintf("%spx %spx %spx %spx %s", num(e.X), num(e.Y), num(e.Blur), num(e.Spread), e.Color))
+			out = append(out, fmt.Sprintf("%spx %spx %spx %spx %s", num(e.X), num(e.Y), num(e.Blur), num(e.Spread), colorWithAlpha(e.Color, shOpacity(e))))
 		case "inner-shadow":
-			out = append(out, fmt.Sprintf("inset %spx %spx %spx %spx %s", num(e.X), num(e.Y), num(e.Blur), num(e.Spread), e.Color))
+			out = append(out, fmt.Sprintf("inset %spx %spx %spx %spx %s", num(e.X), num(e.Y), num(e.Blur), num(e.Spread), colorWithAlpha(e.Color, shOpacity(e))))
 		}
 	}
 	return strings.Join(out, ", ")
@@ -647,4 +647,23 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func shOpacity(e Effect) float64 {
+	if e.Opacity <= 0 || e.Opacity > 1 {
+		if e.Opacity == 0 {
+			return 1
+		}
+		return 1
+	}
+	return e.Opacity
+}
+
+// colorWithAlpha appends an alpha byte to a #rrggbb color.
+func colorWithAlpha(hex string, a float64) string {
+	if a >= 1 || len(hex) < 7 {
+		return hex
+	}
+	b := int(a*255 + 0.5)
+	return fmt.Sprintf("%s%02x", hex, b)
 }

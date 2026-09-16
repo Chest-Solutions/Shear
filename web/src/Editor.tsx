@@ -1118,7 +1118,7 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
           />
         )}
 
-        <div className="pointer-events-none absolute top-3 z-20" style={{ right: 272 + 12 + 10 }}>
+        <div className="pointer-events-none absolute top-3 z-20" style={{ right: 252 + 12 + 10 }}>
           <PresencePill peers={collab.peers} self={collab.self} live={live} onShare={() => setShareOpen(true)} />
         </div>
 
@@ -1150,6 +1150,8 @@ export function Editor({ docId, initialDoc, join, onHome }: EditorProps) {
 
         {animMode && (
           <TimelineBar
+            left={leftOpen ? 74 + 240 + 2 : 74 + 2}
+            right={252 + 12 + 8}
             node={selectedNode}
             time={time}
             playing={timelinePlaying}

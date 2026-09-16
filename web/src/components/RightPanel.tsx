@@ -43,7 +43,7 @@ interface Props {
  */
 export function RightPanel(props: Props) {
   return (
-    <aside className="absolute inset-y-3 right-3 z-10 flex w-[272px] flex-col overflow-hidden rounded-xl border border-white/10 bg-ink-900/95 shadow-panel backdrop-blur-xl">
+    <aside className="absolute inset-y-3 right-3 z-10 flex w-[252px] flex-col overflow-hidden rounded-lg border border-white/10 bg-[#252525] shadow-panel">
       <div className="flex shrink-0 border-b border-white/5">
         {(['design', 'export', 'code'] as const).map((t) => (
           <button
@@ -235,11 +235,16 @@ function NodeProps(props: Props & { node: Node }) {
         <Section
           title="Fills"
           right={
-            hasFill ? (
+            <>
+              <HdrBtn title="Add fill" onClick={() => props.onUpdateNode(n.id, { fill: n.fill ?? '#D3D3D3', gradient: null })}>
+                <Plus size={11} strokeWidth={2} />
+              </HdrBtn>
+            {hasFill ? (
               <HdrBtn title={n.gradient ? 'Back to solid' : 'Gradient fill'} onClick={() => props.onUpdateNode(n.id, { gradient: n.gradient ? null : { angle: 90, stops: [{ pos: 0, color: n.fill ?? '#ffffff' }, { pos: 1, color: '#000000' }] } })}>
                 <svg width="11" height="11" viewBox="0 0 10 10"><defs><linearGradient id="gp" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fff"/><stop offset="1" stopColor="#444"/></linearGradient></defs><rect width="10" height="10" rx="2" fill="url(#gp)"/></svg>
               </HdrBtn>
-            ) : undefined
+            ) : null}
+            </>
           }
         >
           {hasFill && (
@@ -272,7 +277,14 @@ function NodeProps(props: Props & { node: Node }) {
         </Section>
       )}
 
-      <Section title="Border">
+      <Section
+        title="Borders"
+        right={
+          <HdrBtn title="Add border" onClick={() => props.onUpdateNode(n.id, { stroke: { color: n.stroke?.color ?? '#ffffff', width: n.stroke?.width ?? 1 } })}>
+            <Plus size={11} strokeWidth={2} />
+          </HdrBtn>
+        }
+      >
         <div className="flex items-center gap-2">
           <Toggle on={n.stroke !== null} onToggle={() => props.onUpdateNode(n.id, { stroke: n.stroke ? null : { color: '#ffffff', width: 1 }, strokeVar: undefined })} />
           <ColorField
@@ -301,7 +313,7 @@ function NodeProps(props: Props & { node: Node }) {
       <Section
         title="Effects"
         right={
-          <HdrBtn title="Add effect" onClick={() => props.onUpdateNode(n.id, { effects: [...(n.effects ?? []), { id: Math.random().toString(36).slice(2), type: 'drop-shadow', visible: true, color: '#000000', x: 0, y: 4, blur: 4, spread: 0 }] })}>
+          <HdrBtn title="Add effect" onClick={() => props.onUpdateNode(n.id, { effects: [...(n.effects ?? []), { id: Math.random().toString(36).slice(2), type: 'drop-shadow', visible: true, color: '#000000', opacity: 0.25, x: 0, y: 4, blur: 4, spread: 0 }] })}>
             <Plus size={11} strokeWidth={2} />
           </HdrBtn>
         }

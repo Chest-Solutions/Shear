@@ -6,7 +6,7 @@
  * leans on framer-motion when any node carries keyframes.
  */
 import type { Node, Scene } from './types'
-import { arrowHead, defaultCornerRadii, lineEnds, polyPoints, ptsAttr, slug } from './utils'
+import { arrowHead, defaultCornerRadii, lineEnds, polyPoints, ptsAttr, slug, withAlpha } from './utils'
 import { gradientEnds, layoutTextLines } from './render'
 import { hasTimeline } from './anim'
 import { drawScene } from './render'
@@ -24,7 +24,7 @@ function radii(n: Node) {
 function shadowCSS(n: Node): string {
   return (n.effects ?? [])
     .filter((e): e is import('./types').ShadowEffect => e.visible && (e.type === 'drop-shadow' || e.type === 'inner-shadow'))
-    .map((e) => `${e.type === 'inner-shadow' ? 'inset ' : ''}${num(e.x)}px ${num(e.y)}px ${num(e.blur)}px ${num(e.spread)}px ${e.color}`)
+    .map((e) => `${e.type === 'inner-shadow' ? 'inset ' : ''}${num(e.x)}px ${num(e.y)}px ${num(e.blur)}px ${num(e.spread)}px ${withAlpha(e.color, e.opacity ?? 1)}`)
     .join(', ')
 }
 
@@ -50,13 +50,19 @@ export function gradientCSS(n: Node): string | null {
   return `linear-gradient(${num(n.gradient.angle + 90)}deg, ${stops.map((s) => `${s.color} ${num(s.pos * 100)}%`).join(', ')})`
 }
 
-let mctx: CanvasRenderingContext2D | null = null
+let mctx: CanvasRenderingContext2D | null | undefined
 /** Width measurer for word wrapping outside the live canvas. */
 export function measurer(font: string): (t: string) => number {
-  if (!mctx) mctx = document.createElement('canvas').getContext('2d')
-  const ctx = mctx
-  ctx!.font = font
-  return (t: string) => ctx!.measureText(t).width
+  if (mctx === undefined) mctx = document.createElement('canvas').getContext('2d')
+  if (mctx) {
+    const ctx = mctx
+    ctx.font = font
+    return (t: string) => ctx.measureText(t).width
+  }
+  // headless fallback (tests): rough glyph width
+  const m = /(\d+(?:\.\d+)?)px/.exec(font)
+  const fs = m ? Number(m[1]) : 12
+  return (t: string) => t.length * fs * 0.6
 }
 
 const UI_FONT = "Inter, -apple-system, 'Segoe UI', sans-serif"
